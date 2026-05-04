@@ -164,6 +164,7 @@ const getDb = (username) => {
         
         // Tabelas para RAG e Histórico do Assistente
         db.run(`CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, content TEXT, timestamp TEXT)`);
+        db.run(`CREATE TABLE IF NOT EXISTS file_gallery (id INTEGER PRIMARY KEY AUTOINCREMENT, serverFilename TEXT, originalName TEXT, mimeType TEXT, size INTEGER, contact TEXT, channel TEXT, direction TEXT, timestamp TEXT)`);
         db.run(`CREATE TABLE IF NOT EXISTS personal_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, content TEXT, created_at TEXT, updated_at TEXT)`);
 
         db.all("PRAGMA table_info(companies)", [], (err, rows) => {
@@ -699,6 +700,26 @@ const getWaClientWrapper = (username) => {
                 type: msg.type
             });
 
+            if (msg.hasMedia) {
+                try {
+                    const media = await msg.downloadMedia();
+                    if (media) {
+                        const originalName = media.filename || ('whatsapp_media_' + msg.timestamp + '.' + (media.mimetype.split('/')[1] || '').split(';')[0] || 'bin');
+                        const serverFilename = Date.now() + '-' + originalName.replace(/[^a-zA-Z0-9.]/g, '_');
+                        const buffer = Buffer.from(media.data, 'base64');
+                        fs.writeFileSync(path.join(UPLOADS_DIR, serverFilename), buffer);
+                        
+                        const db = getDb(username);
+                        if(db) {
+                            db.run('INSERT INTO file_gallery (serverFilename, originalName, mimeType, size, contact, channel, direction, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                                [serverFilename, originalName, media.mimetype, buffer.length, msg.from, 'whatsapp', 'received', new Date().toISOString()]);
+                        }
+                    }
+                } catch(e) {
+                    log(`[WhatsApp Inbound] Erro ao baixar media auto: ${e.message}`);
+                }
+            }
+
             try {
                 if (msg.from.includes('@g.us') || msg.isStatus) {
                     return;
@@ -870,7 +891,8 @@ const sendDailySummaryToUser = async (user) => {
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; 
+    const headerToken = authHeader && authHeader.split(' ')[1]; 
+    const token = headerToken || req.query.token;
     if (!token) return res.status(401).json({ error: 'Token não fornecido' });
     const parts = token.split('-');
     if (parts.length < 3) return res.status(403).json({ error: 'Token inválido' });
@@ -1145,6 +1167,11 @@ app.post('/api/whatsapp/send-chat', upload.single('media'), async (req, res) => 
             const fileData = fs.readFileSync(req.file.path).toString('base64');
             const media = new MessageMedia(req.file.mimetype, fileData, req.file.originalname);
             await safeSendMessage(wrapper.client, chatId, content ? media : media, content ? {caption: content} : {});
+            const db = getDb(req.user);
+            if(db) {
+                db.run('INSERT INTO file_gallery (serverFilename, originalName, mimeType, size, contact, channel, direction, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, chatId, 'whatsapp', 'sent', new Date().toISOString()]);
+            }
         } else {
             if(content) await safeSendMessage(wrapper.client, chatId, content);
         }
@@ -1413,6 +1440,19 @@ app.post('/api/send-documents', async (req, res) => {
                     db.run(`INSERT INTO document_status (companyId, category, competence, status) VALUES (?, ?, ?, 'sent') ON CONFLICT(companyId, category, competence) DO UPDATE SET status='sent'`, 
                         [doc.companyId, doc.category, doc.competence]);
                 }
+                
+                // Track in File Gallery
+                if (doc.serverFilename) {
+                    try {
+                        const filePath = path.join(UPLOADS_DIR, doc.serverFilename);
+                        if (fs.existsSync(filePath)) {
+                            const stat = fs.statSync(filePath);
+                            db.run(`INSERT INTO file_gallery (serverFilename, originalName, mimeType, size, contact, channel, direction, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                                [doc.serverFilename, doc.docName, 'application/pdf', stat.size, company.name, channels.whatsapp ? (channels.email ? 'Email/WhatsApp' : 'WhatsApp') : 'Email', 'sent', new Date().toISOString()]);
+                        }
+                    } catch (e) {}
+                }
+
                 if (doc.id) sentIds.push(doc.id);
                 successCount++;
             }
@@ -1427,6 +1467,38 @@ app.post('/api/send-documents', async (req, res) => {
 
 app.get('/api/recent-sends', (req, res) => {
     getDb(req.user).all("SELECT * FROM sent_logs ORDER BY id DESC LIMIT 3", (err, rows) => res.json(rows || []));
+});
+
+app.get('/api/file-gallery', authenticateToken, (req, res) => {
+    getDb(req.user).all("SELECT * FROM file_gallery ORDER BY timestamp DESC", (err, rows) => {
+        if(err) return res.status(500).json({error: err.message});
+        res.json(rows || []);
+    });
+});
+
+app.delete('/api/file-gallery/:id', authenticateToken, (req, res) => {
+    const db = getDb(req.user);
+    db.get("SELECT serverFilename FROM file_gallery WHERE id = ?", [req.params.id], (err, row) => {
+        if (row && row.serverFilename) {
+            try {
+                fs.unlinkSync(path.join(UPLOADS_DIR, row.serverFilename));
+            } catch(e) {}
+        }
+        db.run("DELETE FROM file_gallery WHERE id = ?", [req.params.id], (err) => {
+            if(err) return res.status(500).json({error: err.message});
+            res.json({success: true});
+        });
+    });
+});
+
+app.get('/api/file-gallery/download/:id', authenticateToken, (req, res) => {
+    const db = getDb(req.user);
+    db.get("SELECT serverFilename, originalName, mimeType FROM file_gallery WHERE id = ?", [req.params.id], (err, row) => {
+        if (!row || !row.serverFilename) return res.status(404).send('Not found');
+        const file = path.join(UPLOADS_DIR, row.serverFilename);
+        if(!fs.existsSync(file)) return res.status(404).send('File not found on disk');
+        res.download(file, row.originalName);
+    });
 });
 
 // --- Rota Catch-All para servir o React corretamente ---

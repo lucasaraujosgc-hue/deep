@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
   Building2, 
@@ -14,8 +14,10 @@ import {
   X,
   Mails,
   UserCog,
-  LogOut
+  LogOut,
+  FolderOpen
 } from 'lucide-react';
+import { api } from '../services/api';
 
 interface SidebarProps {
   activePage: string;
@@ -26,6 +28,23 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isOpen, setIsOpen, onLogout }) => {
+  const [totalSize, setTotalSize] = useState(0);
+
+  useEffect(() => {
+     api.getFileGallery().then(files => {
+         const size = files.reduce((acc, f) => acc + (f.size || 0), 0);
+         setTotalSize(size);
+     }).catch(() => {});
+  }, [activePage]); // Refresh size when page changes
+
+  const formatSize = (bytes: number) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   const menuItems = [
     { id: 'dashboard', label: 'Kanban (WhatsApp)', icon: KanbanSquare },
     { id: 'companies', label: 'Empresas', icon: Building2 },
@@ -35,6 +54,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isOpen, se
     { id: 'bulksend', label: 'Envio em Massa', icon: Mails },
     { id: 'scheduled', label: 'Agendamentos', icon: CalendarClock },
     { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
+    { id: 'gallery', label: 'Galeria de Arquivos', icon: FolderOpen },
     { id: 'settings', label: 'Usuário', icon: UserCog },
   ];
 
@@ -80,8 +100,15 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isOpen, se
                     : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                   }`}
               >
-                <Icon className="w-4 h-4" />
-                <span className="font-medium text-sm">{item.label}</span>
+                <div className="flex-1 flex items-center gap-3">
+                  <Icon className="w-4 h-4" />
+                  <span className="font-medium text-sm">{item.label}</span>
+                </div>
+                {item.id === 'gallery' && (
+                  <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-300">
+                    {formatSize(totalSize)}
+                  </span>
+                )}
               </button>
             );
           })}

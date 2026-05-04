@@ -27,6 +27,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [chatLoading, setChatLoading] = useState(false);
   const [sendingMsg, setSendingMsg] = useState(false);
   const [transcribingMap, setTranscribingMap] = useState<Record<string, boolean>>({});
+  const [searchTerm, setSearchTerm] = useState('');
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -77,6 +78,16 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           colId: existingCard ? existingCard.colId : (firstColId || ''),
           tagIds: existingCard ? existingCard.tagIds : []
       };
+  }).filter(card => {
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+      if (card.name.toLowerCase().includes(term)) return true;
+      if (card.id.toLowerCase().includes(term)) return true;
+      const hasMatchingTag = card.tagIds.some(tid => {
+          const tag = kanbanState.tags.find(t => t.id === tid);
+          return tag && tag.name.toLowerCase().includes(term);
+      });
+      return hasMatchingTag;
   });
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -200,7 +211,19 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           <p className="text-sm text-gray-500">Gerencie suas conversas eficientemente</p>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
-           <div className="flex bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex-1">
+           <div className="flex bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0 shadow-sm grow md:grow-0">
+               <div className="pl-3 flex items-center justify-center text-gray-400">
+                  <Search className="w-4 h-4" />
+               </div>
+               <input 
+                  type="text"
+                  placeholder="Pesquisar (Nome, n°, tag)..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="px-3 py-2 bg-transparent outline-none flex-1 text-sm min-w-[200px]"
+               />
+           </div>
+           <div className="flex bg-gray-50 border border-gray-200 rounded-lg overflow-hidden shrink-0">
                <input 
                   type="text"
                   placeholder="Carregar Número (Ex: 55119999999)"

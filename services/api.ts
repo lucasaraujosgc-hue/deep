@@ -158,6 +158,16 @@ export const api = {
     return handleResponse(res);
   },
 
+  getFileGallery: async (): Promise<any[]> => {
+    const res = await fetch(`${API_URL}/file-gallery`, { headers: getAuthHeader() });
+    return handleResponse(res);
+  },
+
+  deleteFileGallery: async (id: number): Promise<void> => {
+    const res = await fetch(`${API_URL}/file-gallery/${id}`, { method: 'DELETE', headers: getAuthHeader() });
+    return handleResponse(res);
+  },
+
   // WhatsApp
   getWhatsAppStatus: async (): Promise<{ status: string; qr: string | null; info?: any }> => {
     const res = await fetch(`${API_URL}/whatsapp/status`, { headers: getAuthHeader() });
