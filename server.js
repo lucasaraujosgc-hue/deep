@@ -67,7 +67,6 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Servir arquivos estáticos do frontend (pasta dist criada pelo Vite)
-// Importante: Isso deve vir antes das rotas de API para garantir performance
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- HELPER: Puppeteer Lock Cleaner ---
@@ -142,6 +141,41 @@ const safeSendMessage = async (client, chatId, content, options = {}) => {
         log(`[WhatsApp] FALHA CRÍTICA NO ENVIO para ${chatId}`, error);
         throw error;
     }
+};
+
+// ============================================================
+// SEÇÃO 1 — HELPER: Salvar mensagem no banco
+// ============================================================
+
+const saveMessageToDb = (db, { id, chatId, sender, timestamp, body, fromMe, hasMedia, type }) => {
+    if (!db || !id || !chatId) return;
+    db.run(
+        `INSERT OR IGNORE INTO whatsapp_messages
+         (id, chatId, sender, timestamp, body, fromMe, hasMedia, type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, chatId, sender || '', timestamp || 0, body || '', fromMe ? 1 : 0, hasMedia ? 1 : 0, type || 'chat'],
+        (err) => { if (err) log(`[DB] Erro ao salvar mensagem ${id}: ${err.message}`); }
+    );
+};
+
+const saveMessagesToDb = (db, messages) => {
+    if (!db || !messages?.length) return Promise.resolve();
+    return new Promise((resolve) => {
+        db.serialize(() => {
+            const stmt = db.prepare(
+                `INSERT OR IGNORE INTO whatsapp_messages
+                 (id, chatId, sender, timestamp, body, fromMe, hasMedia, type)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            );
+            messages.forEach(m => {
+                stmt.run([
+                    m.id, m.chatId, m.sender || '', m.timestamp || 0,
+                    m.body || '', m.fromMe ? 1 : 0, m.hasMedia ? 1 : 0, m.type || 'chat'
+                ]);
+            });
+            stmt.finalize(resolve);
+        });
+    });
 };
 
 // --- MULTI-TENANCY: Database Management ---
@@ -396,7 +430,7 @@ const assistantTools = [
 const executeTool = async (name, args, db, username) => {
     log(`[AI Tool] Executando ${name} com args: ${JSON.stringify(args)}`);
     
-    // 1. Consultar Tarefas (Sem Limite Rígido se pedir todas)
+    // 1. Consultar Tarefas
     if (name === "consult_tasks") {
         return new Promise((resolve) => {
             let sql = "SELECT id, title, priority, status, dueDate FROM tasks";
@@ -417,7 +451,7 @@ const executeTool = async (name, args, db, username) => {
         });
     }
 
-    // 2. Atualizar Status (Marcar como Concluída)
+    // 2. Atualizar Status
     if (name === "update_task_status") {
         return new Promise((resolve) => {
             const isId = /^\d+$/.test(args.task_id_or_title);
@@ -451,7 +485,7 @@ const executeTool = async (name, args, db, username) => {
         });
     }
 
-    // 4. Lembrete Pessoal (Agendamento no Cron)
+    // 4. Lembrete Pessoal
     if (name === "set_personal_reminder") {
         return new Promise(resolve => {
             db.run(`INSERT INTO scheduled_messages (title, message, nextRun, recurrence, active, type, channels, targetType, createdBy) VALUES (?, ?, ?, ?, 1, 'message', ?, 'personal', ?)`,
@@ -462,7 +496,7 @@ const executeTool = async (name, args, db, username) => {
         });
     }
 
-    // 5. Enviar Mensagem para Empresa (Disparo Real)
+    // 5. Enviar Mensagem para Empresa
     if (name === "send_message_to_company") {
         return new Promise(async (resolve) => {
             db.all("SELECT * FROM companies WHERE name LIKE ? LIMIT 5", [`%${args.company_name_search}%`], async (err, rows) => {
@@ -688,25 +722,47 @@ const getWaClientWrapper = (username) => {
             }
         });
 
-        // --- INTERCEPTADOR DE MENSAGENS (IA) ---
+        // ============================================================
+        // SEÇÃO 2 — CORRIGIR handler 'message' (mensagens RECEBIDAS)
+        // ============================================================
         client.on('message', async (msg) => {
             if (msg.from.includes('@g.us') || msg.to.includes('@g.us') || msg.isStatus || (msg.id && msg.id.remote && msg.id.remote.includes('@g.us'))) {
                 return;
             }
 
             const sender = msg.from;
+            const chatId = msg.from;
             log(`[WhatsApp Inbound] Mensagem recebida de: ${sender} | Body: ${msg.body?.substring(0, 30)}...`);
 
-            // SSE Broadcast
-            broadcastWaEvent(username, 'message', {
+            // ✅ CORRIGIDO: tipo agora é 'whatsapp_message' (era 'message')
+            // ✅ NOVO: chatId e fromMe incluídos no payload
+            const msgPayload = {
                 id: msg.id._serialized,
                 from: msg.from,
                 to: msg.to,
                 body: msg.body,
                 timestamp: msg.timestamp,
                 hasMedia: msg.hasMedia,
-                type: msg.type
-            });
+                type: msg.type,
+                fromMe: false,
+                chatId: chatId
+            };
+            broadcastWaEvent(username, 'whatsapp_message', msgPayload);
+
+            // ✅ NOVO: Persistir no banco imediatamente
+            const db = getDb(username);
+            if (db) {
+                saveMessageToDb(db, {
+                    id: msg.id._serialized,
+                    chatId,
+                    sender: msg.from,
+                    timestamp: msg.timestamp,
+                    body: msg.body || '',
+                    fromMe: false,
+                    hasMedia: msg.hasMedia,
+                    type: msg.type
+                });
+            }
 
             if (msg.hasMedia) {
                 try {
@@ -784,9 +840,15 @@ const getWaClientWrapper = (username) => {
             }
         });
 
+        // ============================================================
+        // SEÇÃO 3 — CORRIGIR handler 'message_create' (mensagens ENVIADAS)
+        // ============================================================
         client.on('message_create', async (msg) => {
             if (msg.fromMe) {
-                broadcastWaEvent(username, 'message_create', {
+                const chatId = msg.to;
+
+                // ✅ CORRIGIDO: tipo 'whatsapp_message' + chatId + fromMe no payload
+                broadcastWaEvent(username, 'whatsapp_message', {
                     id: msg.id._serialized,
                     from: msg.from,
                     to: msg.to,
@@ -794,8 +856,24 @@ const getWaClientWrapper = (username) => {
                     timestamp: msg.timestamp,
                     hasMedia: msg.hasMedia,
                     type: msg.type,
-                    fromMe: true
+                    fromMe: true,
+                    chatId: chatId
                 });
+
+                // ✅ NOVO: Persistir mensagem enviada no banco
+                const db = getDb(username);
+                if (db) {
+                    saveMessageToDb(db, {
+                        id: msg.id._serialized,
+                        chatId,
+                        sender: msg.from,
+                        timestamp: msg.timestamp,
+                        body: msg.body || '',
+                        fromMe: true,
+                        hasMedia: msg.hasMedia,
+                        type: msg.type
+                    });
+                }
             }
         });
 
@@ -1050,12 +1128,10 @@ app.post('/api/tasks', (req, res) => {
     const createdAt = t.createdAt || today;
 
     if (t.id && t.id < 1000000000000) {
-        // Update
         db.run(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=? WHERE id=?`, 
         [t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.id], 
         function(err) { res.json({ success: !err, id: t.id }); });
     } else {
-        // Insert
         db.run(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
         [t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt], 
         function(err) { res.json({ success: !err, id: this.lastID }); });
@@ -1146,9 +1222,41 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         const chat = await wrapper.client.getChatById(req.params.chatId);
         const limitParam = parseInt(req.query.limit) || 50;
-        const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)}); // Limit max to 300
-        res.json(messages.map(m => ({
+        const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
+
+        const mapped = messages.map(m => ({
             id: m.id._serialized,
+            from: m.from,
+            to: m.to,
+            body: m.body,
+            timestamp: m.timestamp,
+            hasMedia: m.hasMedia,
+            type: m.type,
+            fromMe: m.fromMe
+        }));
+
+        // ✅ NOVO: Persistir no banco as mensagens trazidas pelo scroll
+        const db = getDb(req.user);
+        if (db) {
+            const chatId = req.params.chatId;
+            const FORTY_FIVE_DAYS_AGO = Math.floor(Date.now() / 1000) - (45 * 24 * 3600);
+            const toSave = messages
+                .filter(m => m.timestamp >= FORTY_FIVE_DAYS_AGO)
+                .map(m => ({
+                    id: m.id._serialized,
+                    chatId,
+                    sender: m.from,
+                    timestamp: m.timestamp,
+                    body: m.body || '',
+                    fromMe: m.fromMe,
+                    hasMedia: m.hasMedia,
+                    type: m.type
+                }));
+            saveMessagesToDb(db, toSave);
+        }
+
+        res.json(mapped.map(m => ({
+            id: { _serialized: m.id, id: m.id },
             from: m.from,
             to: m.to,
             body: m.body,
@@ -1158,6 +1266,174 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
             fromMe: m.fromMe
         })));
     } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// ============================================================
+// SEÇÃO 4 — NOVA ROTA: GET /api/whatsapp/messages-db/:chatId
+// ============================================================
+app.get('/api/whatsapp/messages-db/:chatId', authenticateToken, async (req, res) => {
+    try {
+        const db = getDb(req.user);
+        if (!db) return res.status(500).json({ error: 'DB não encontrado' });
+
+        const chatId = req.params.chatId;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        const before = req.query.before ? parseInt(req.query.before) : null;
+
+        let sql = `SELECT * FROM whatsapp_messages WHERE chatId = ?`;
+        const params = [chatId];
+
+        if (before) {
+            sql += ` AND timestamp < ?`;
+            params.push(before);
+        }
+
+        sql += ` ORDER BY timestamp DESC LIMIT ?`;
+        params.push(limit);
+
+        db.all(sql, params, (err, rows) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            const messages = rows.reverse().map(row => ({
+                id: { _serialized: row.id, id: row.id },
+                from: row.fromMe ? undefined : row.sender,
+                to: row.fromMe ? row.chatId : undefined,
+                body: row.body,
+                timestamp: row.timestamp,
+                hasMedia: !!row.hasMedia,
+                type: row.type || 'chat',
+                fromMe: !!row.fromMe,
+                chatId: row.chatId,
+                _fromDb: true
+            }));
+
+            res.json(messages);
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================================
+// SEÇÃO 5 — NOVA ROTA: GET /api/whatsapp/sync-status/:chatId
+// ============================================================
+app.get('/api/whatsapp/sync-status/:chatId', authenticateToken, async (req, res) => {
+    try {
+        const db = getDb(req.user);
+        if (!db) return res.status(500).json({ error: 'DB não encontrado' });
+
+        const chatId = req.params.chatId;
+
+        db.get(`SELECT lastSyncTimestamp FROM whatsapp_sync WHERE chatId = ?`, [chatId], (err, syncRow) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            db.get(`SELECT COUNT(*) as count FROM whatsapp_messages WHERE chatId = ?`, [chatId], (err2, countRow) => {
+                res.json({
+                    synced: !!syncRow,
+                    lastSync: syncRow ? syncRow.lastSyncTimestamp : null,
+                    messageCount: countRow ? countRow.count : 0
+                });
+            });
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================================
+// SEÇÃO 6 — NOVA ROTA: POST /api/whatsapp/load-history/:chatId
+// ============================================================
+app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, res) => {
+    try {
+        const wrapper = getWaClientWrapper(req.user);
+        if (!wrapper || wrapper.status !== 'connected') {
+            return res.status(400).json({ error: 'WhatsApp não conectado' });
+        }
+
+        const db = getDb(req.user);
+        if (!db) return res.status(500).json({ error: 'DB não encontrado' });
+
+        const chatId = req.params.chatId;
+        const forceRefresh = req.query.force === 'true';
+
+        const syncRow = await new Promise(resolve => {
+            db.get(`SELECT lastSyncTimestamp FROM whatsapp_sync WHERE chatId = ?`, [chatId], (e, r) => resolve(r));
+        });
+
+        if (syncRow && !forceRefresh) {
+            const sinceHours = (Date.now() / 1000 - syncRow.lastSyncTimestamp) / 3600;
+            if (sinceHours < 1) {
+                return res.json({
+                    already_synced: true,
+                    lastSync: syncRow.lastSyncTimestamp,
+                    message: 'Histórico já carregado recentemente. Use ?force=true para forçar.'
+                });
+            }
+        }
+
+        log(`[History] Iniciando busca de histórico 45 dias para: ${chatId}`);
+
+        const FORTY_FIVE_DAYS_AGO = Math.floor(Date.now() / 1000) - (45 * 24 * 3600);
+        const chat = await wrapper.client.getChatById(chatId);
+
+        let allMessages = [];
+        let totalFetched = 0;
+        let reachedLimit = false;
+        let batchLimit = 100;
+        let fetchedBatch = await chat.fetchMessages({ limit: batchLimit });
+
+        while (fetchedBatch && fetchedBatch.length > 0 && !reachedLimit) {
+            totalFetched += fetchedBatch.length;
+
+            const inPeriod = fetchedBatch.filter(m => m.timestamp >= FORTY_FIVE_DAYS_AGO);
+            allMessages = [...allMessages, ...inPeriod];
+
+            log(`[History] Batch: ${fetchedBatch.length} msgs | No período: ${inPeriod.length} | Total acumulado: ${allMessages.length}`);
+
+            if (fetchedBatch.some(m => m.timestamp < FORTY_FIVE_DAYS_AGO)) {
+                reachedLimit = true;
+                break;
+            }
+
+            if (fetchedBatch.length < batchLimit) break;
+            if (totalFetched >= 3000) break;
+
+            batchLimit = Math.min(batchLimit + 100, 500);
+            fetchedBatch = await chat.fetchMessages({ limit: batchLimit });
+        }
+
+        const toSave = allMessages.map(m => ({
+            id: m.id._serialized,
+            chatId,
+            sender: m.from,
+            timestamp: m.timestamp,
+            body: m.body || '',
+            fromMe: m.fromMe,
+            hasMedia: m.hasMedia,
+            type: m.type
+        }));
+
+        await saveMessagesToDb(db, toSave);
+
+        const now = Math.floor(Date.now() / 1000);
+        db.run(
+            `INSERT OR REPLACE INTO whatsapp_sync (chatId, lastSyncTimestamp) VALUES (?, ?)`,
+            [chatId, now]
+        );
+
+        log(`[History] Concluído: ${allMessages.length} mensagens salvas para ${chatId}`);
+
+        res.json({
+            success: true,
+            count: allMessages.length,
+            reachedLimit,
+            sinceDays: 45
+        });
+
+    } catch (e) {
+        log(`[History] ERRO ao carregar histórico`, e);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.post('/api/whatsapp/send-chat', upload.single('media'), async (req, res) => {
@@ -1293,7 +1569,7 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                 const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
                     if (kanbanCards.includes(c.id._serialized)) return true;
                     if (c.unreadCount > 0) return true;
-                    if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true; // Last 7 days
+                    if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true;
                     return false;
                 });
 
@@ -1310,7 +1586,6 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                     };
                 });
                 
-                // Sort by recent timestamp
                 simplifiedChats.sort((a, b) => b.timestamp - a.timestamp);
 
                 res.json(simplifiedChats);
@@ -1321,13 +1596,11 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// --- NEW ROUTE: HARD RESET ---
 app.post('/api/whatsapp/reset', async (req, res) => {
     try {
         const username = req.user;
         log(`[WhatsApp Reset] Solicitado reset forçado para: ${username}`);
         
-        // 1. Destruir cliente atual se existir
         if (waClients[username] && waClients[username].client) {
             try {
                 await waClients[username].client.destroy();
@@ -1338,7 +1611,6 @@ app.post('/api/whatsapp/reset', async (req, res) => {
             delete waClients[username];
         }
 
-        // 2. Apagar pasta de autenticação
         const authPath = path.join(DATA_DIR, `whatsapp_auth_${username}`);
         if (fs.existsSync(authPath)) {
             try {
@@ -1350,7 +1622,6 @@ app.post('/api/whatsapp/reset', async (req, res) => {
             }
         }
 
-        // 3. Reiniciar wrapper (vai gerar novo QR Code na próxima chamada de status)
         getWaClientWrapper(username);
 
         res.json({ success: true, message: "Sessão resetada. Aguarde o novo QR Code." });
@@ -1360,7 +1631,6 @@ app.post('/api/whatsapp/reset', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-
 
 app.post('/api/send-documents', async (req, res) => {
     const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate } = req.body;
@@ -1477,7 +1747,6 @@ app.post('/api/send-documents', async (req, res) => {
                     
                     mensagemCompleta += `\n\n${whatsappSignature}`;
 
-                    // --- USANDO O HELPER SEGURO ---
                     await safeSendMessage(client, chatId, mensagemCompleta);
                     
                     for (const att of validAttachments) {
@@ -1487,7 +1756,6 @@ app.post('/api/send-documents', async (req, res) => {
                             
                             await safeSendMessage(client, chatId, media);
                             
-                            // Delay para evitar flood
                             await new Promise(r => setTimeout(r, 3000));
                         } catch (mediaErr) {
                             log(`[WhatsApp] Erro envio mídia ${att.filename}`, mediaErr);
@@ -1511,7 +1779,6 @@ app.post('/api/send-documents', async (req, res) => {
                         [doc.companyId, doc.category, doc.competence]);
                 }
                 
-                // Track in File Gallery
                 if (doc.serverFilename) {
                     try {
                         const filePath = path.join(UPLOADS_DIR, doc.serverFilename);
@@ -1571,12 +1838,30 @@ app.get('/api/file-gallery/download/:id', authenticateToken, (req, res) => {
     });
 });
 
+// ============================================================
+// SEÇÃO 7 — NOVA ROTA: GET /api/file-gallery/view/:id
+// ============================================================
+app.get('/api/file-gallery/view/:id', authenticateToken, (req, res) => {
+    const db = getDb(req.user);
+    db.get(`SELECT serverFilename, originalName, mimeType FROM file_gallery WHERE id = ?`, [req.params.id], (err, row) => {
+        if (err || !row || !row.serverFilename) return res.status(404).send('Not found');
+
+        const filePath = path.join(UPLOADS_DIR, row.serverFilename);
+        if (!fs.existsSync(filePath)) return res.status(404).send('File not found on disk');
+
+        res.setHeader('Content-Type', row.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(row.originalName)}"`);
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        fs.createReadStream(filePath).pipe(res);
+    });
+});
+
 // --- Rota Catch-All para servir o React corretamente ---
 app.get(/.*/, (req, res) => {
     if (!req.path.startsWith('/api')) res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// --- CRON JOB (Atualizado para Lembretes Pessoais) ---
+// --- CRON JOB ---
 setInterval(() => {
     const envUsers = (process.env.USERS || '').split(',');
     envUsers.forEach(user => {
@@ -1602,7 +1887,6 @@ setInterval(() => {
 
             for (const msg of rows) {
                 try {
-                    // --- CASO 1: LEMBRETE PESSOAL (Novo) ---
                     if (msg.targetType === 'personal') {
                         if (clientReady && settings?.dailySummaryNumber) {
                             let number = settings.dailySummaryNumber.replace(/\D/g, '');
@@ -1613,7 +1897,6 @@ setInterval(() => {
                             log(`[CRON] Lembrete pessoal enviado para ${user}`);
                         }
                     } 
-                    // --- CASO 2: MENSAGEM PARA EMPRESAS (Existente) ---
                     else {
                         const channels = JSON.parse(msg.channels || '{}');
                         const selectedIds = JSON.parse(msg.selectedCompanyIds || '[]');
@@ -1733,9 +2016,8 @@ setInterval(() => {
                                 }
                             }
                         } 
-                    } // Fim do bloco de msg para empresas
+                    }
 
-                    // Atualização da Recorrência (Para todos os tipos)
                     if (msg.recurrence === 'unico') {
                         db.run("UPDATE scheduled_messages SET active = 0 WHERE id = ?", [msg.id]);
                     } else {
