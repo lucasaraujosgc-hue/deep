@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Building2, CheckCircle2, Clock, AlertCircle, Loader2, Bot, Power, User, Trash2,
-  Plus, MoreHorizontal, MessageCircle, Settings, X, Search, Phone, Send, Mic, Paperclip, Music, FileText, Image as ImageIcon, RefreshCw
+  Plus, MoreHorizontal, MessageCircle, Settings, X, Search, Phone, Send, Mic, 
+  Paperclip, Music, FileText, Image as ImageIcon, RefreshCw, History, Download
 } from 'lucide-react';
 import { UserSettings, WaKanbanState, WaKanbanColumn, WaKanbanTag, WaKanbanCard } from '../types';
 import { api } from '../services/api';
@@ -15,12 +15,12 @@ interface Props {
 
 const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [loading, setLoading] = useState(true);
-  const [waChats, setWaChats] = useState<any[]>([]); // All WA chats
+  const [waChats, setWaChats] = useState<any[]>([]);
   const [contactNumber, setContactNumber] = useState('');
   
   // Modals
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [activeChat, setActiveChat] = useState<any | null>(null); // To open chat UI
+  const [activeChat, setActiveChat] = useState<any | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<File | null>(null);
@@ -32,6 +32,9 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [chatDetailsMap, setChatDetailsMap] = useState<Record<string, { profilePicUrl?: string | null, lastMessage?: string, lastMessageFromMe?: boolean, name?: string, number?: string | null }>>({});
   const [expandedMediaUrl, setExpandedMediaUrl] = useState<string | null>(null);
   const [expandedMediaType, setExpandedMediaType] = useState<'image' | 'video' | 'document' | null>(null);
+  const [syncStatus, setSyncStatus] = useState<Record<string, { synced: boolean; lastSync: number | null; messageCount: number }>>({});
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -51,60 +54,89 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       activeChatRef.current = activeChat;
   }, [activeChat]);
 
+  // SSE Handler corrigido
   useEffect(() => {
     loadWaChats();
-    // Start SSE stream
+
     const token = localStorage.getItem('cm_auth_token');
     const es = new EventSource(`/api/whatsapp/events?token=${token}`);
-    
+
     es.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+
         if (data.type === 'whatsapp_message') {
-           const msg = data.message;
-           const chatId = msg.fromMe ? msg.to : msg.from;
-           const isMedia = msg.hasMedia || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'document';
-           const previewText = msg.body || (isMedia ? '[Mídia]' : '');
-           
-           setChatDetailsMap(prev => ({
-               ...prev,
-               [chatId]: {
-                   ...prev[chatId],
-                   lastMessage: previewText,
-                   lastMessageFromMe: msg.fromMe,
-               }
-           }));
+          const msg = data.payload;
+          const chatId = msg.fromMe ? msg.to : msg.from;
+          const isMedia = msg.hasMedia || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'document';
+          const previewText = msg.body || (isMedia ? '[Mídia]' : '');
 
-           setWaChats(prev => {
-               const idx = prev.findIndex(c => (c.id._serialized || c.id) === chatId);
-               if (idx >= 0) {
-                   const newChats = [...prev];
-                   newChats[idx] = { 
-                       ...newChats[idx], 
-                       unreadCount: msg.fromMe ? 0 : (newChats[idx].unreadCount + 1),
-                       timestamp: msg.timestamp 
-                   };
-                   return newChats.sort((a, b) => b.timestamp - a.timestamp);
-               }
-               // Optionally call loadWaChats() if it's a completely new chat
-               loadWaChats();
-               return prev;
-           });
+          // Atualizar preview do card no kanban
+          setChatDetailsMap(prev => ({
+            ...prev,
+            [chatId]: {
+              ...prev[chatId],
+              lastMessage: previewText,
+              lastMessageFromMe: msg.fromMe,
+            }
+          }));
 
-           const currentActiveChat = activeChatRef.current;
-           if (currentActiveChat && msg && (msg.from === currentActiveChat.id._serialized || msg.to === currentActiveChat.id._serialized)) {
-             setChatMessages(prev => [...prev, msg]);
-             setTimeout(scrollToBottom, 100);
-           }
+          // Atualizar lista de chats
+          setWaChats(prev => {
+            const idx = prev.findIndex(c => (c.id._serialized || c.id) === chatId);
+            if (idx >= 0) {
+              const newChats = [...prev];
+              newChats[idx] = {
+                ...newChats[idx],
+                unreadCount: msg.fromMe ? 0 : (newChats[idx].unreadCount + 1),
+                timestamp: msg.timestamp
+              };
+              return newChats.sort((a, b) => b.timestamp - a.timestamp);
+            }
+            loadWaChats();
+            return prev;
+          });
+
+          // Adicionar mensagem na conversa ativa
+          const currentActiveChat = activeChatRef.current;
+          if (currentActiveChat) {
+            const currentChatId = currentActiveChat.id._serialized || currentActiveChat.id;
+            if (chatId === currentChatId) {
+              const formattedMsg = {
+                id: { _serialized: msg.id, id: msg.id },
+                from: msg.from,
+                to: msg.to,
+                body: msg.body,
+                timestamp: msg.timestamp,
+                hasMedia: msg.hasMedia,
+                type: msg.type,
+                fromMe: msg.fromMe,
+              };
+
+              setChatMessages(prev => {
+                const already = prev.some(m => {
+                  const mId = m.id?._serialized || m.id?.id || m.id;
+                  return mId === msg.id;
+                });
+                if (already) return prev;
+                return [...prev, formattedMsg];
+              });
+              setTimeout(scrollToBottom, 100);
+            }
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('[SSE] Erro ao processar evento:', e);
+      }
+    };
+
+    es.onerror = () => {
+      console.warn('[SSE] Conexão perdida, tentando reconectar...');
     };
 
     return () => { es.close(); };
   }, []);
 
-  // Combine Kanban Cards with Real Chats
-  // Provide defaults for chats that aren't manually assigned yet
   const firstColId = kanbanState.columns[0]?.id;
   const mergedCards = waChats.map(chat => {
       const chatId = typeof chat.id === 'object' ? chat.id._serialized : chat.id;
@@ -140,7 +172,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   });
 
   useEffect(() => {
-     // Lazy load chat info for rendered cards
      const fetchMissingInfo = async () => {
          const missingIds = mergedCards
              .map(c => c.id)
@@ -148,9 +179,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 
          if (missingIds.length === 0) return;
 
-         // Fetch 1 by 1 or in batches
          for (const id of missingIds) {
-             // Avoid refetching immediately if already in progress by setting a placeholder
              setChatDetailsMap(prev => ({ ...prev, [id]: { ...(prev[id] || {}), profilePicUrl: null } }));
              try {
                  const info = await api.getWhatsAppChatInfo(id);
@@ -182,7 +211,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
     const chatId = e.dataTransfer.getData("chatId");
     if (!chatId) return;
 
-    // Move Card logic
     const newCards = [...kanbanState.cards];
     const cardIdx = newCards.findIndex(c => c.id === chatId);
     if (cardIdx >= 0) {
@@ -210,7 +238,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           if (contact) {
               const newCardId = contact.id;
               
-              // Add to kanban if missing
               const existsInKanban = kanbanState.cards.find(c => c.id === newCardId);
               if (!existsInKanban) {
                   const newCard: WaKanbanCard = { 
@@ -222,7 +249,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                   await updateKanbanState({ ...kanbanState, cards: [...kanbanState.cards, newCard] });
               }
 
-              // Add to waChats so it shows up in the board right away
               setWaChats(prev => {
                   if (prev.find(c => c.id._serialized === newCardId)) return prev;
                   return [{
@@ -233,9 +259,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                       isGroup: contact.isGroup
                   }, ...prev];
               });
-              
-              // Remove loadWaChats() if we manually updated state, or keep it to refresh other things.
-              // We've appended manually, no need to load all right now.
           }
       } catch (e) {
           alert('Erro ao carregar contato');
@@ -252,66 +275,185 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       messagesEndRef.current?.scrollIntoView();
   };
 
-  const openChat = async (cardItem: any, fetchHistory: boolean = true) => {
-      setActiveChat({ id: { _serialized: cardItem.id }, name: cardItem.name });
-      if (!fetchHistory) {
-          setChatMessages([]);
-          setChatLoading(false);
-          setMsgLimit(50);
-          return;
-      }
-      
-      setChatLoading(true);
-      try {
-          const msgs = await api.getWhatsAppMessages(cardItem.id, 50);
-          setChatMessages(msgs);
-          setTimeout(scrollToBottom, 100);
-      } catch (e) {
-          console.error(e);
-      } finally {
-          setChatLoading(false);
-      }
+  // Função para carregar mensagens do banco
+  const loadMessagesFromDb = async (chatId: string, before?: number): Promise<any[]> => {
+    const token = localStorage.getItem('cm_auth_token');
+    const url = before
+      ? `/api/whatsapp/messages-db/${chatId}?limit=50&before=${before}`
+      : `/api/whatsapp/messages-db/${chatId}?limit=50`;
+
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!res.ok) throw new Error('Falha ao carregar mensagens do banco');
+    return res.json();
   };
 
-  const loadMoreMessages = () => {
-      if (activeChat) {
-          const newLimit = msgLimit + 50;
-          setMsgLimit(newLimit);
-          setChatLoading(true);
-          api.getWhatsAppMessages(activeChat.id._serialized || activeChat.id, newLimit).then(msgs => {
-              setChatMessages(msgs);
-          }).finally(() => {
-              setChatLoading(false);
+  const checkSyncStatus = async (chatId: string) => {
+    const token = localStorage.getItem('cm_auth_token');
+    const res = await fetch(`/api/whatsapp/sync-status/${chatId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const status = await res.json();
+      setSyncStatus(prev => ({ ...prev, [chatId]: status }));
+      return status;
+    }
+    return null;
+  };
+
+  // openChat corrigido - carrega do banco
+  const openChat = async (cardItem: any) => {
+    const chatId = cardItem.id;
+    setActiveChat({ id: { _serialized: chatId }, name: cardItem.name });
+    setChatLoading(true);
+    setMsgLimit(50);
+
+    try {
+      const msgs = await loadMessagesFromDb(chatId);
+      setChatMessages(msgs);
+      setTimeout(scrollToBottom, 100);
+      checkSyncStatus(chatId);
+    } catch (e) {
+      console.error('[openChat] Erro ao carregar do banco:', e);
+      setChatMessages([]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // loadMoreMessages corrigido - scroll infinito
+  const loadMoreMessages = async () => {
+    if (!activeChat || chatLoading) return;
+    setChatLoading(true);
+
+    try {
+      const chatId = activeChat.id._serialized || activeChat.id;
+
+      const oldestTimestamp = chatMessages.length > 0
+        ? Math.min(...chatMessages.map(m => m.timestamp))
+        : undefined;
+
+      const olderMsgs = await loadMessagesFromDb(chatId, oldestTimestamp);
+
+      if (olderMsgs.length > 0) {
+        const container = document.querySelector('[data-chat-container]');
+        const scrollHeightBefore = container?.scrollHeight || 0;
+
+        setChatMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id?._serialized || m.id?.id));
+          const newMsgs = olderMsgs.filter(m => {
+            const id = m.id?._serialized || m.id?.id;
+            return !existingIds.has(id);
           });
+          return [...newMsgs, ...prev];
+        });
+
+        setTimeout(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight - scrollHeightBefore;
+          }
+        }, 50);
+      } else {
+        const newLimit = msgLimit + 50;
+        setMsgLimit(newLimit);
+        const msgs = await api.getWhatsAppMessages(chatId, newLimit);
+
+        if (msgs.length > 0) {
+          const token = localStorage.getItem('cm_auth_token');
+          fetch(`/api/whatsapp/messages/${chatId}?limit=${newLimit}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+        }
+
+        setChatMessages(msgs);
       }
+    } catch (e) {
+      console.error('[loadMoreMessages] Erro:', e);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
+  // Carregar histórico de 45 dias
+  const loadHistoryFrom45Days = async () => {
+    if (!activeChat || isLoadingHistory) return;
+    const chatId = activeChat.id._serialized || activeChat.id;
+
+    setIsLoadingHistory(true);
+    try {
+      const token = localStorage.getItem('cm_auth_token');
+      const res = await fetch(`/api/whatsapp/load-history/${chatId}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      const result = await res.json();
+
+      if (result.already_synced) {
+        alert(`Histórico já carregado anteriormente.\nÚltima sincronização: ${new Date(result.lastSync * 1000).toLocaleString('pt-BR')}`);
+      } else if (result.success) {
+        alert(`✅ ${result.count} mensagens carregadas com sucesso!`);
+        const msgs = await loadMessagesFromDb(chatId);
+        setChatMessages(msgs);
+        setTimeout(scrollToBottom, 100);
+        setHistoryLoaded(prev => ({ ...prev, [chatId]: true }));
+        checkSyncStatus(chatId);
+      } else {
+        alert('Erro ao carregar histórico: ' + (result.error || 'Tente novamente'));
+      }
+    } catch (e: any) {
+      alert('Erro de conexão: ' + e.message);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  // handleSendMessage corrigido com optimistic update
   const handleSendMessage = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if ((!newMessageText.trim() && !selectedMedia) || !activeChat || sendingMsg) return;
+    e.preventDefault();
+    if ((!newMessageText.trim() && !selectedMedia) || !activeChat || sendingMsg) return;
 
-      setSendingMsg(true);
-      try {
-          await api.sendWhatsAppChat({
-              chatId: activeChat.id._serialized,
-              message: newMessageText,
-              media: selectedMedia || undefined
-          });
-          setNewMessageText('');
-          setSelectedMedia(null);
-          // O message_create recebido pelo SSE deve atualizar a tela
-      } catch (e) {
-          alert('Erro ao enviar mensagem');
-      } finally {
-          setSendingMsg(false);
-      }
+    const textToSend = newMessageText;
+    const mediaToSend = selectedMedia;
+
+    setSendingMsg(true);
+    setNewMessageText('');
+    setSelectedMedia(null);
+
+    const optimisticMsg = {
+      id: { _serialized: `optimistic_${Date.now()}`, id: `optimistic_${Date.now()}` },
+      body: textToSend,
+      timestamp: Math.floor(Date.now() / 1000),
+      fromMe: true,
+      type: mediaToSend ? (mediaToSend.type.startsWith('image') ? 'image' : 'document') : 'chat',
+      hasMedia: !!mediaToSend,
+      _optimistic: true
+    };
+    setChatMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(scrollToBottom, 50);
+
+    try {
+      await api.sendWhatsAppChat({
+        chatId: activeChat.id._serialized,
+        message: textToSend,
+        media: mediaToSend || undefined
+      });
+    } catch (e) {
+      setChatMessages(prev => prev.filter(m => !m._optimistic));
+      setNewMessageText(textToSend);
+      setSelectedMedia(mediaToSend);
+      alert('Erro ao enviar mensagem. Tente novamente.');
+    } finally {
+      setSendingMsg(false);
+    }
   };
 
   const handleTranscribe = async (msgId: string) => {
       setTranscribingMap(prev => ({...prev, [msgId]: true}));
       try {
           const res = await api.transcribeWhatsAppAudio(msgId);
-          // Update the localized chat messages state to embed the transcription text
           setChatMessages(prev => prev.map(m => {
               if (m.id.id === msgId || m.id._serialized === msgId) {
                   return { ...m, transcription: res.transcription };
@@ -326,7 +468,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   };
 
   const formatWaMarkdown = (text: string) => {
-      // Basic translation from WhatsApp MD (*bold*, _italic_, ~strike~) to standard MD (**bold**, *italic*, ~~strike~~)
       if (!text) return "";
       let formatted = text.replace(/\*([^*_~]+)\*/g, '**$1**');
       formatted = formatted.replace(/_([^*_~]+)_/g, '*$1*');
@@ -454,7 +595,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                           })}
                                       </div>
 
-                                      {/* Action Buttons */}
                                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                           <div className="relative">
                                               <button 
@@ -617,7 +757,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           </div>
                       </div>
                       <div className="flex items-center gap-3">
-                           {/* Tag selector dropdown placeholder */}
                            <div className="relative group">
                                <button className="text-gray-500 hover:text-gray-700 bg-white p-1.5 rounded-md border text-xs flex items-center gap-1">
                                   Tags
@@ -651,122 +790,175 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                       </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{backgroundColor: '#efeae2', backgroundImage: `url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")`, backgroundRepeat: 'repeat', backgroundSize: '400px'}}>
-                      {chatLoading && msgLimit === 50 ? (
+                  <div
+                    className="flex-1 overflow-y-auto p-4 space-y-4"
+                    data-chat-container
+                    style={{backgroundColor: '#efeae2', backgroundImage: `url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")`, backgroundRepeat: 'repeat', backgroundSize: '400px'}}
+                  >
+                      {chatLoading && chatMessages.length === 0 ? (
                           <div className="flex justify-center p-10"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
                       ) : (
                           <>
-                              {chatMessages.length === 0 ? (
-                                  <div className="flex justify-center mb-4 relative z-10">
-                                      <button 
+                              {/* Botão "Carregar mais antigas" do banco (scroll infinito) */}
+                              {chatMessages.length > 0 && (
+                                  <div className="flex justify-center mb-2">
+                                      <button
                                           onClick={loadMoreMessages}
                                           disabled={chatLoading}
-                                          className="text-sm bg-white border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow hover:bg-gray-50 flex items-center gap-2"
-                                      >
-                                          {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                                          Carregar histórico de mensagens
-                                      </button>
-                                  </div>
-                              ) : chatMessages.length >= msgLimit ? (
-                                  <div className="flex justify-center mb-4">
-                                      <button 
-                                          onClick={loadMoreMessages}
-                                          disabled={chatLoading}
-                                          className="text-sm bg-white border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow-sm hover:bg-gray-50 flex items-center gap-2"
+                                          className="text-sm bg-white/90 border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow-sm hover:bg-white flex items-center gap-2 transition-all"
                                       >
                                           {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                                           Carregar mais antigas
                                       </button>
                                   </div>
+                              )}
+
+                              {/* Botão principal "Carregar histórico (45 dias)" */}
+                              {!historyLoaded[activeChat.id._serialized] && !syncStatus[activeChat.id._serialized]?.synced && (
+                                  <div className="flex justify-center mb-3">
+                                      <button
+                                          onClick={loadHistoryFrom45Days}
+                                          disabled={isLoadingHistory}
+                                          className="text-sm bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-full shadow-md flex items-center gap-2 font-medium transition-all disabled:opacity-60"
+                                      >
+                                          {isLoadingHistory
+                                              ? <><Loader2 className="w-4 h-4 animate-spin" /> Carregando histórico...</>
+                                              : <><History className="w-4 h-4" /> Carregar histórico (45 dias)</>
+                                          }
+                                      </button>
+                                  </div>
+                              )}
+
+                              {/* Mensagem de histórico já sincronizado */}
+                              {(historyLoaded[activeChat.id._serialized] || syncStatus[activeChat.id._serialized]?.synced) && (
+                                  <div className="flex justify-center mb-2">
+                                      <span className="text-xs bg-white/70 text-gray-500 px-3 py-1 rounded-full">
+                                          ✅ Histórico sincronizado •{' '}
+                                          {syncStatus[activeChat.id._serialized]?.lastSync
+                                              ? new Date(syncStatus[activeChat.id._serialized].lastSync! * 1000).toLocaleDateString('pt-BR')
+                                              : 'recentemente'
+                                          }
+                                      </span>
+                                  </div>
+                              )}
+
+                              {chatMessages.length === 0 && !chatLoading ? (
+                                  <div className="flex flex-col items-center justify-center mt-10 gap-3">
+                                      <div className="text-center text-gray-500 text-sm bg-white/90 py-3 px-5 rounded-xl shadow-sm inline-block">
+                                          Nenhuma mensagem local encontrada.
+                                      </div>
+                                      {!historyLoaded[activeChat.id._serialized] && !syncStatus[activeChat.id._serialized]?.synced && (
+                                          <button
+                                              onClick={loadHistoryFrom45Days}
+                                              disabled={isLoadingHistory}
+                                              className="text-sm bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-full shadow-md flex items-center gap-2 font-medium"
+                                          >
+                                              {isLoadingHistory
+                                                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</>
+                                                  : <><History className="w-4 h-4" /> Carregar histórico (45 dias)</>
+                                              }
+                                          </button>
+                                      )}
+                                  </div>
                               ) : null}
+
+                              {/* Mensagens */}
                               {chatMessages.map((msg, idx) => {
-                              const isMe = msg.fromMe;
-                              let msgTypeIcon = null;
-                              if(msg.type === 'image') msgTypeIcon = <ImageIcon className="w-4 h-4"/>;
-                              if(msg.type === 'document') msgTypeIcon = <FileText className="w-4 h-4"/>;
-                              if(msg.type === 'audio' || msg.type === 'ptt') msgTypeIcon = <Music className="w-4 h-4"/>;
+                                  const isMe = msg.fromMe;
+                                  let msgTypeIcon = null;
+                                  if(msg.type === 'image') msgTypeIcon = <ImageIcon className="w-4 h-4"/>;
+                                  if(msg.type === 'document') msgTypeIcon = <FileText className="w-4 h-4"/>;
+                                  if(msg.type === 'audio' || msg.type === 'ptt') msgTypeIcon = <Music className="w-4 h-4"/>;
 
-                              const msgIdStr = msg.id?.id || msg.id?._serialized;
+                                  const msgIdStr = msg.id?.id || msg.id?._serialized;
+                                  const isOptimistic = msg._optimistic;
 
-                              return (
-                                  <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                      <div className={`max-w-[80%] rounded-xl p-3 shadow-sm ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-gray-100'}`}>
-                                          {msgTypeIcon && (
-                                              <div className="flex flex-col gap-2 mb-1 border-b border-black/5 pb-1">
-                                                  <div className="flex items-center gap-2 text-gray-500">
-                                                      {msgTypeIcon}
-                                                      <span className="text-xs font-semibold">{msg.type.toUpperCase()}</span>
-                                                      
-                                                      {(msg.type === 'audio' || msg.type === 'ptt') && !msg.transcription && msgIdStr && (
-                                                          <button 
-                                                            onClick={() => handleTranscribe(msgIdStr)}
-                                                            disabled={transcribingMap[msgIdStr]}
-                                                            className="ml-2 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 flex items-center min-w-[90px] justify-center"
-                                                          >
-                                                              {transcribingMap[msgIdStr] ? <Loader2 className="w-3 h-3 animate-spin" /> : 'IA: Transcrever'}
-                                                          </button>
+                                  return (
+                                      <div key={msgIdStr || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                          <div className={`max-w-[80%] rounded-xl p-3 shadow-sm ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-gray-100'} ${isOptimistic ? 'opacity-70' : ''}`}>
+                                              {msgTypeIcon && (
+                                                  <div className="flex flex-col gap-2 mb-1 border-b border-black/5 pb-1">
+                                                      <div className="flex items-center gap-2 text-gray-500">
+                                                          {msgTypeIcon}
+                                                          <span className="text-xs font-semibold">{msg.type?.toUpperCase()}</span>
+                                                          
+                                                          {(msg.type === 'audio' || msg.type === 'ptt') && !msg.transcription && msgIdStr && !isOptimistic && (
+                                                              <button 
+                                                                onClick={() => handleTranscribe(msgIdStr)}
+                                                                disabled={transcribingMap[msgIdStr]}
+                                                                className="ml-2 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 flex items-center min-w-[90px] justify-center"
+                                                              >
+                                                                  {transcribingMap[msgIdStr] ? <Loader2 className="w-3 h-3 animate-spin" /> : 'IA: Transcrever'}
+                                                              </button>
+                                                          )}
+                                                      </div>
+                                                      {(msg.type === 'audio' || msg.type === 'ptt') && msgIdStr && !isOptimistic && (
+                                                          <audio 
+                                                              controls 
+                                                              className="mt-1 h-10 w-full max-w-[240px]" 
+                                                              src={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`}
+                                                              preload="metadata"
+                                                          />
+                                                      )}
+                                                      {(msg.type === 'image' || msg.type === 'video') && msgIdStr && !isOptimistic && (
+                                                          <img 
+                                                              src={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`} 
+                                                              alt="Media" 
+                                                              className="mt-2 rounded-lg max-h-[200px] object-cover cursor-pointer hover:opacity-90 border border-gray-200" 
+                                                              onClick={() => {
+                                                                  setExpandedMediaUrl(`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`);
+                                                                  setExpandedMediaType(msg.type as 'image' | 'video');
+                                                              }}
+                                                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                              loading="lazy"
+                                                          />
+                                                      )}
+                                                      {msg.type === 'document' && msgIdStr && !isOptimistic && (
+                                                          <div className="flex gap-2 mt-2">
+                                                              <button 
+                                                                  onClick={() => {
+                                                                      setExpandedMediaUrl(`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`);
+                                                                      setExpandedMediaType('document');
+                                                                  }}
+                                                                  className="flex-1 flex items-center justify-center p-2 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 text-blue-700 text-sm font-medium transition-colors gap-1"
+                                                              >
+                                                                  <FileText className="w-4 h-4" /> Visualizar
+                                                              </button>
+                                                              <a
+                                                                  href={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`}
+                                                                  download
+                                                                  className="flex items-center justify-center p-2 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors"
+                                                                  title="Baixar"
+                                                              >
+                                                                  <Download className="w-4 h-4" />
+                                                              </a>
+                                                          </div>
                                                       )}
                                                   </div>
-                                                  {(msg.type === 'audio' || msg.type === 'ptt') && msgIdStr && (
-                                                      <audio 
-                                                          controls 
-                                                          className="mt-1 h-10 w-full max-w-[240px]" 
-                                                          src={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`} 
-                                                      />
-                                                  )}
-                                                  {(msg.type === 'image' || msg.type === 'video') && msgIdStr && (
-                                                      <img 
-                                                          src={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`} 
-                                                          alt="Media" 
-                                                          className="mt-2 text-xs rounded-lg max-h-[200px] object-cover cursor-pointer hover:opacity-90 border border-gray-200" 
-                                                          onClick={() => {
-                                                              setExpandedMediaUrl(`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`);
-                                                              setExpandedMediaType(msg.type as 'image' | 'video');
-                                                          }}
-                                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                                      />
-                                                  )}
-                                                  {msg.type === 'document' && msgIdStr && (
-                                                      <button 
-                                                          onClick={() => {
-                                                              setExpandedMediaUrl(`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`);
-                                                              setExpandedMediaType('document');
-                                                          }}
-                                                          className="mt-2 w-full flex items-center justify-center p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 text-gray-700 text-sm font-medium transition-colors"
-                                                      >
-                                                          Visualizar documento
-                                                      </button>
-                                                  )}
-                                              </div>
-                                          )}
-                                          
-                                          {msg.body && (
-                                              <div className="text-sm text-gray-800 break-words markdown-body whatsapp-md">
-                                                  <ReactMarkdown>{formatWaMarkdown(msg.body)}</ReactMarkdown>
-                                              </div>
-                                          )}
+                                              )}
+                                              
+                                              {msg.body && (
+                                                  <div className="text-sm text-gray-800 break-words markdown-body whatsapp-md">
+                                                      <ReactMarkdown>{formatWaMarkdown(msg.body)}</ReactMarkdown>
+                                                  </div>
+                                              )}
 
-                                          {msg.transcription && (
-                                              <div className="mt-2 p-2 bg-blue-50 border-l-2 border-blue-500 text-sm text-gray-800 rounded">
-                                                  <strong>Transcrição IA:</strong><br/>
-                                                  <ReactMarkdown>{formatWaMarkdown(msg.transcription)}</ReactMarkdown>
+                                              {msg.transcription && (
+                                                  <div className="mt-2 p-2 bg-blue-50 border-l-2 border-blue-500 text-sm text-gray-800 rounded">
+                                                      <strong>Transcrição IA:</strong><br/>
+                                                      <ReactMarkdown>{formatWaMarkdown(msg.transcription)}</ReactMarkdown>
+                                                  </div>
+                                              )}
+                                              
+                                              <div className={`text-[10px] text-right mt-1 ${isMe ? 'text-green-700/70' : 'text-gray-400'}`}>
+                                                  {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                  {isOptimistic && ' ⏳'}
                                               </div>
-                                          )}
-                                          
-                                          <div className={`text-[10px] text-right mt-1 ${isMe ? 'text-green-700/70' : 'text-gray-400'}`}>
-                                              {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                           </div>
                                       </div>
-                                  </div>
-                              );
-                          })}
+                                  );
+                              })}
                           </>
-                      )}
-                      
-                      {chatMessages.length === 0 && !chatLoading && (
-                          <div className="flex justify-center mt-10">
-                              <div className="text-center text-gray-500 text-sm bg-white/90 py-2 px-4 rounded-xl shadow-sm inline-block">Nenhuma mensagem nesta sessão.</div>
-                          </div>
                       )}
                       
                       <div ref={messagesEndRef} />
