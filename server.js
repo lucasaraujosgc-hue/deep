@@ -1136,12 +1136,13 @@ app.get('/api/whatsapp/events', (req, res) => {
     });
 });
 
-app.get('/api/whatsapp/messages/:chatId', async (req, res) => {
+app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         const chat = await wrapper.client.getChatById(req.params.chatId);
-        const messages = await chat.fetchMessages({limit: 50});
+        const limitParam = parseInt(req.query.limit) || 50;
+        const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)}); // Limit max to 300
         res.json(messages.map(m => ({
             id: m.id._serialized,
             from: m.from,
@@ -1239,15 +1240,37 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
-        const chats = await wrapper.client.getChats();
-        const simplifiedChats = chats.filter(c => !c.isGroup).map(c => ({
-            id: c.id._serialized,
-            name: c.name || c.id.user,
-            unreadCount: c.unreadCount,
-            timestamp: c.timestamp,
-            isGroup: c.isGroup
-        }));
-        res.json(simplifiedChats);
+        
+        const db = getDb(req.user);
+        db.get("SELECT settings FROM user_settings WHERE id = 1", async (err, row) => {
+            try {
+                let kanbanCards = [];
+                if (row && row.settings) {
+                    try {
+                        const settings = JSON.parse(row.settings);
+                        kanbanCards = (settings.waKanban?.cards || []).map(c => c.id);
+                    } catch(e) {}
+                }
+                
+                const chats = await wrapper.client.getChats();
+                const now = Date.now() / 1000;
+                const simplifiedChats = chats.filter(c => !c.isGroup).filter(c => {
+                    if (kanbanCards.includes(c.id._serialized)) return true;
+                    if (c.unreadCount > 0) return true;
+                    if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true; // Last 7 days
+                    return false;
+                }).map(c => ({
+                    id: c.id._serialized,
+                    name: c.name || c.id.user,
+                    unreadCount: c.unreadCount,
+                    timestamp: c.timestamp,
+                    isGroup: c.isGroup
+                }));
+                res.json(simplifiedChats);
+            } catch(e) {
+                res.status(500).json({error: e.message});
+            }
+        });
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 

@@ -189,8 +189,8 @@ export const api = {
     return handleResponse(res);
   },
 
-  getWhatsAppMessages: async (chatId: string): Promise<any[]> => {
-    const res = await fetch(`${API_URL}/whatsapp/messages/${encodeURIComponent(chatId)}`, { headers: getAuthHeader() });
+  getWhatsAppMessages: async (chatId: string, limit: number = 50): Promise<any[]> => {
+    const res = await fetch(`${API_URL}/whatsapp/messages/${encodeURIComponent(chatId)}?limit=${limit}`, { headers: getAuthHeader() });
     return handleResponse(res);
   },
 
@@ -220,7 +220,7 @@ export const api = {
     return handleResponse(res);
   },
 
-  getWhatsAppContact: async (number: string): Promise<{ chatId: string, name: string }> => {
+  getWhatsAppContact: async (number: string): Promise<{ id: string, name: string, isGroup: boolean }> => {
     const res = await fetch(`${API_URL}/whatsapp/contact`, { 
         method: 'POST', 
         headers: getHeaders(),

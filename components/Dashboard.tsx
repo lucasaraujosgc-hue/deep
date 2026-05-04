@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Building2, CheckCircle2, Clock, AlertCircle, Loader2, Bot, Power, User,
-  Plus, MoreHorizontal, MessageCircle, Settings, X, Search, Phone, Send, Mic, Paperclip, Music, FileText, Image as ImageIcon
+  Plus, MoreHorizontal, MessageCircle, Settings, X, Search, Phone, Send, Mic, Paperclip, Music, FileText, Image as ImageIcon, RefreshCw
 } from 'lucide-react';
 import { UserSettings, WaKanbanState, WaKanbanColumn, WaKanbanTag, WaKanbanCard } from '../types';
 import { api } from '../services/api';
@@ -130,7 +130,34 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           setLoading(true);
           const contact = await api.getWhatsAppContact(contactNumber);
           if (contact) {
-              await loadWaChats();
+              const newCardId = contact.id;
+              
+              // Add to kanban if missing
+              const existsInKanban = kanbanState.cards.find(c => c.id === newCardId);
+              if (!existsInKanban) {
+                  const newCard: WaKanbanCard = { 
+                      id: newCardId, 
+                      tagIds: [], 
+                      colId: kanbanState.columns[0]?.id || '',
+                      name: contact.name || newCardId.split('@')[0]
+                  };
+                  await updateKanbanState({ ...kanbanState, cards: [...kanbanState.cards, newCard] });
+              }
+
+              // Add to waChats so it shows up in the board right away
+              setWaChats(prev => {
+                  if (prev.find(c => c.id._serialized === newCardId)) return prev;
+                  return [{
+                      id: { _serialized: newCardId, user: newCardId.split('@')[0] },
+                      name: contact.name || newCardId.split('@')[0],
+                      unreadCount: 0,
+                      timestamp: Date.now() / 1000,
+                      isGroup: contact.isGroup
+                  }, ...prev];
+              });
+              
+              // Remove loadWaChats() if we manually updated state, or keep it to refresh other things.
+              // We've appended manually, no need to load all right now.
           }
       } catch (e) {
           alert('Erro ao carregar contato');
@@ -140,16 +167,26 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       }
   };
 
-  const openChat = async (cardItem: any) => {
+  const [msgLimit, setMsgLimit] = useState(50);
+
+  const openChat = async (cardItem: any, limit: number = 50) => {
       setActiveChat({ id: { _serialized: cardItem.id }, name: cardItem.name });
       setChatLoading(true);
+      setMsgLimit(limit);
       try {
-          const msgs = await api.getWhatsAppMessages(cardItem.id);
+          const msgs = await api.getWhatsAppMessages(cardItem.id, limit);
           setChatMessages(msgs.reverse());
       } catch (e) {
           console.error(e);
       } finally {
           setChatLoading(false);
+      }
+  };
+
+  const loadMoreMessages = () => {
+      if (activeChat) {
+          const newLimit = msgLimit + 50;
+          openChat({ id: activeChat.id._serialized, name: activeChat.name }, newLimit);
       }
   };
 
@@ -437,10 +474,23 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" style={{backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)', backgroundSize: '16px 16px'}}>
-                      {chatLoading ? (
+                      {chatLoading && msgLimit === 50 ? (
                           <div className="flex justify-center p-10"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
                       ) : (
-                          chatMessages.map((msg, idx) => {
+                          <>
+                              {chatMessages.length >= msgLimit && (
+                                  <div className="flex justify-center mb-4">
+                                      <button 
+                                          onClick={loadMoreMessages}
+                                          disabled={chatLoading}
+                                          className="text-sm bg-white border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow-sm hover:bg-gray-50 flex items-center gap-2"
+                                      >
+                                          {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                          Carregar mais antigas
+                                      </button>
+                                  </div>
+                              )}
+                              {chatMessages.map((msg, idx) => {
                               const isMe = msg.fromMe;
                               let msgTypeIcon = null;
                               if(msg.type === 'image') msgTypeIcon = <ImageIcon className="w-4 h-4"/>;
@@ -488,7 +538,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       </div>
                                   </div>
                               );
-                          })
+                          })}
+                          </>
                       )}
                       
                       {chatMessages.length === 0 && !chatLoading && (
