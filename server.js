@@ -1293,18 +1293,10 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                     return false;
                 });
 
-                const simplifiedChatsPromises = filteredChats.map(async c => {
-                    let contactName = c.name;
-                    if (!contactName || contactName === c.id.user) {
-                        try {
-                            const contact = await c.getContact();
-                            contactName = contact.name || contact.pushname || c.id.user;
-                        } catch(e) {}
-                    }
-
+                const simplifiedChats = filteredChats.map(c => {
                     return {
                         id: c.id._serialized,
-                        name: contactName,
+                        name: c.name || c.id.user,
                         unreadCount: c.unreadCount,
                         timestamp: c.timestamp,
                         isGroup: c.isGroup,
@@ -1313,8 +1305,6 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                         lastMessageFromMe: false
                     };
                 });
-                
-                const simplifiedChats = await Promise.all(simplifiedChatsPromises);
                 
                 // Sort by recent timestamp
                 simplifiedChats.sort((a, b) => b.timestamp - a.timestamp);

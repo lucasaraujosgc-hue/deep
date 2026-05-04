@@ -45,7 +45,7 @@ const AiFab: React.FC = () => {
         {!isOpen && (
             <button 
                 onClick={() => setIsOpen(true)}
-                className="w-14 h-14 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl hover:scale-105 transition-transform"
+                className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-xl hover:scale-105 transition-transform"
             >
                 <Bot className="w-7 h-7" />
             </button>

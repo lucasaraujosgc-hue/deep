@@ -29,7 +29,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [transcribingMap, setTranscribingMap] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [tagMenuCardId, setTagMenuCardId] = useState<string | null>(null);
-  const [chatDetailsMap, setChatDetailsMap] = useState<Record<string, { profilePicUrl?: string | null, lastMessage?: string, lastMessageFromMe?: boolean, name?: string }>>({});
+  const [chatDetailsMap, setChatDetailsMap] = useState<Record<string, { profilePicUrl?: string | null, lastMessage?: string, lastMessageFromMe?: boolean, name?: string, number?: string | null }>>({});
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -151,7 +151,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                          profilePicUrl: info.profilePicUrl,
                          lastMessage: info.lastMessage,
                          lastMessageFromMe: info.lastMessageFromMe,
-                         name: info.pushname
+                         name: info.pushname,
+                         number: info.number
                      }
                  }));
              } catch(e) {}
@@ -237,12 +238,18 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 
   const [msgLimit, setMsgLimit] = useState(50);
 
-  const openChat = async (cardItem: any, limit: number = 50) => {
+  const openChat = async (cardItem: any, fetchHistory: boolean = false) => {
       setActiveChat({ id: { _serialized: cardItem.id }, name: cardItem.name });
+      if (!fetchHistory) {
+          setChatMessages([]);
+          setChatLoading(false);
+          setMsgLimit(50);
+          return;
+      }
+      
       setChatLoading(true);
-      setMsgLimit(limit);
       try {
-          const msgs = await api.getWhatsAppMessages(cardItem.id, limit);
+          const msgs = await api.getWhatsAppMessages(cardItem.id, msgLimit);
           setChatMessages(msgs.reverse());
       } catch (e) {
           console.error(e);
@@ -254,7 +261,13 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const loadMoreMessages = () => {
       if (activeChat) {
           const newLimit = msgLimit + 50;
-          openChat({ id: activeChat.id._serialized, name: activeChat.name }, newLimit);
+          setMsgLimit(newLimit);
+          setChatLoading(true);
+          api.getWhatsAppMessages(activeChat.id._serialized || activeChat.id, newLimit).then(msgs => {
+              setChatMessages(msgs.reverse());
+          }).finally(() => {
+              setChatLoading(false);
+          });
       }
   };
 
@@ -576,12 +589,16 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
               <div className="bg-white w-full md:w-[600px] h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
                   <div className="bg-slate-100 p-4 border-b flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600">
-                              <User className="w-5 h-5" />
+                          <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600 overflow-hidden">
+                              {chatDetailsMap[activeChat.id._serialized || activeChat.id]?.profilePicUrl ? (
+                                  <img src={chatDetailsMap[activeChat.id._serialized || activeChat.id].profilePicUrl!} alt={activeChat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                  <User className="w-5 h-5" />
+                              )}
                           </div>
                           <div>
-                              <h3 className="font-bold text-gray-800">{activeChat.name}</h3>
-                              <p className="text-xs text-gray-500">{activeChat.id._serialized}</p>
+                              <h3 className="font-bold text-gray-800">{chatDetailsMap[activeChat.id._serialized || activeChat.id]?.name || activeChat.name}</h3>
+                              <p className="text-xs text-gray-500">{chatDetailsMap[activeChat.id._serialized || activeChat.id]?.number ? `+${chatDetailsMap[activeChat.id._serialized || activeChat.id].number}` : (activeChat.id._serialized || activeChat.id)}</p>
                           </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -619,12 +636,23 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                       </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" style={{backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)', backgroundSize: '16px 16px'}}>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{backgroundColor: '#efeae2', backgroundImage: `url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")`, backgroundRepeat: 'repeat', backgroundSize: '400px'}}>
                       {chatLoading && msgLimit === 50 ? (
                           <div className="flex justify-center p-10"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
                       ) : (
                           <>
-                              {chatMessages.length >= msgLimit && (
+                              {chatMessages.length === 0 ? (
+                                  <div className="flex justify-center mb-4 relative z-10">
+                                      <button 
+                                          onClick={loadMoreMessages}
+                                          disabled={chatLoading}
+                                          className="text-sm bg-white border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow hover:bg-gray-50 flex items-center gap-2"
+                                      >
+                                          {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                          Carregar histórico de mensagens
+                                      </button>
+                                  </div>
+                              ) : chatMessages.length >= msgLimit ? (
                                   <div className="flex justify-center mb-4">
                                       <button 
                                           onClick={loadMoreMessages}
@@ -635,7 +663,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                           Carregar mais antigas
                                       </button>
                                   </div>
-                              )}
+                              ) : null}
                               {chatMessages.map((msg, idx) => {
                               const isMe = msg.fromMe;
                               let msgTypeIcon = null;
@@ -689,7 +717,9 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                       )}
                       
                       {chatMessages.length === 0 && !chatLoading && (
-                          <div className="text-center text-gray-400 text-sm mt-10">Nenhuma mensagem encontrada.</div>
+                          <div className="flex justify-center mt-10">
+                              <div className="text-center text-gray-500 text-sm bg-white/90 py-2 px-4 rounded-xl shadow-sm inline-block">Nenhuma mensagem nesta sessão.</div>
+                          </div>
                       )}
                   </div>
 
