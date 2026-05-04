@@ -166,6 +166,10 @@ const getDb = (username) => {
         db.run(`CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, content TEXT, timestamp TEXT)`);
         db.run(`CREATE TABLE IF NOT EXISTS file_gallery (id INTEGER PRIMARY KEY AUTOINCREMENT, serverFilename TEXT, originalName TEXT, mimeType TEXT, size INTEGER, contact TEXT, channel TEXT, direction TEXT, timestamp TEXT)`);
         db.run(`CREATE TABLE IF NOT EXISTS personal_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, content TEXT, created_at TEXT, updated_at TEXT)`);
+        db.run(`CREATE TABLE IF NOT EXISTS whatsapp_messages (id TEXT PRIMARY KEY, chatId TEXT NOT NULL, sender TEXT, timestamp INTEGER, body TEXT, fromMe INTEGER, hasMedia INTEGER, type TEXT, transcription TEXT)`);
+        db.run(`CREATE TABLE IF NOT EXISTS whatsapp_sync (chatId TEXT PRIMARY KEY, lastSyncTimestamp INTEGER)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chatId ON whatsapp_messages(chatId)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_timestamp ON whatsapp_messages(timestamp)`);
 
         db.all("PRAGMA table_info(companies)", [], (err, rows) => {
             if (rows && !rows.some(col => col.name === 'categories')) {
