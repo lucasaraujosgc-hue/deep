@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Building2, CheckCircle2, Clock, AlertCircle, Loader2, Bot, Power, User,
+  Building2, CheckCircle2, Clock, AlertCircle, Loader2, Bot, Power, User, Trash2,
   Plus, MoreHorizontal, MessageCircle, Settings, X, Search, Phone, Send, Mic, Paperclip, Music, FileText, Image as ImageIcon, RefreshCw
 } from 'lucide-react';
 import { UserSettings, WaKanbanState, WaKanbanColumn, WaKanbanTag, WaKanbanCard } from '../types';
@@ -28,6 +28,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [sendingMsg, setSendingMsg] = useState(false);
   const [transcribingMap, setTranscribingMap] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState('');
+  const [tagMenuCardId, setTagMenuCardId] = useState<string | null>(null);
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -68,12 +69,15 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   // Provide defaults for chats that aren't manually assigned yet
   const firstColId = kanbanState.columns[0]?.id;
   const mergedCards = waChats.map(chat => {
-      const existingCard = kanbanState.cards.find(c => c.id === chat.id._serialized);
+      const chatId = typeof chat.id === 'object' ? chat.id._serialized : chat.id;
+      const existingCard = kanbanState.cards.find(c => c.id === chatId);
       return {
-          id: chat.id._serialized || '',
-          name: chat.name || (chat.id && chat.id.user) || 'Desconhecido',
+          id: chatId || '',
+          name: chat.name || (typeof chat.id === 'object' ? chat.id.user : chat.id?.split('@')[0]) || 'Desconhecido',
           unreadCount: chat.unreadCount,
-          lastMessage: chat.lastMessage?.body,
+          lastMessage: chat.lastMessage,
+          lastMessageFromMe: chat.lastMessageFromMe,
+          profilePicUrl: chat.profilePicUrl,
           timestamp: chat.timestamp,
           colId: existingCard ? existingCard.colId : (firstColId || ''),
           tagIds: existingCard ? existingCard.tagIds : []
@@ -316,32 +320,110 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       e.dataTransfer.effectAllowed = "move";
                                   }}
                                   onClick={() => openChat(card)}
-                                  className="bg-white p-3 rounded-lg shadow border border-gray-100 cursor-pointer hover:shadow-md hover:border-blue-300 transition-all active:cursor-grabbing border-l-4"
+                                  className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-lg hover:border-blue-300 transition-all active:cursor-grabbing border-l-4 group"
                                   style={{ borderLeftColor: col.color }}
                               >
-                                  <div className="flex justify-between items-start mb-1">
-                                      <h4 className="font-bold text-gray-800 text-sm truncate max-w-[180px]">{card.name}</h4>
-                                      {card.unreadCount > 0 && (
-                                          <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                                              {card.unreadCount}
-                                          </span>
-                                      )}
+                                  <div className="flex items-center gap-3 mb-2">
+                                      <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
+                                          {card.profilePicUrl ? (
+                                              <img src={card.profilePicUrl} alt={card.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                          ) : (
+                                              <User className="w-full h-full p-2 text-gray-400" />
+                                          )}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                          <div className="flex justify-between items-start">
+                                              <h4 className="font-semibold text-gray-800 text-sm truncate">{card.name}</h4>
+                                              {card.unreadCount > 0 && (
+                                                  <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                                                      {card.unreadCount}
+                                                  </span>
+                                              )}
+                                          </div>
+                                      </div>
                                   </div>
-                                  <p className="text-xs text-gray-500 line-clamp-2 min-h-[32px]">{card.lastMessage || 'Sem mensagem'}</p>
+
+                                  <div className="flex items-center gap-1 text-sm text-gray-500 mb-2 truncate">
+                                      {card.lastMessageFromMe && <CheckCircle2 className="w-4 h-4 text-blue-500 flex-shrink-0" />}
+                                      <p className="truncate">{card.lastMessage || 'Sem mensagem'}</p>
+                                  </div>
                                   
-                                  {card.tagIds.length > 0 && (
-                                      <div className="flex flex-wrap gap-1 mt-2">
+                                  <div className="flex items-center justify-between mt-3">
+                                      <div className="flex flex-wrap gap-1 items-center flex-1 min-w-0">
                                           {card.tagIds.map(tid => {
                                               const tag = kanbanState.tags.find(t => t.id === tid);
                                               if (!tag) return null;
                                               return (
-                                                <span key={tag.id} className="text-[9px] px-1.5 py-0.5 rounded-full text-white" style={{backgroundColor: tag.color}}>
-                                                    {tag.name}
+                                                <span key={tag.id} className="text-xs px-2 py-0.5 border rounded-full flex items-center gap-1 font-medium bg-gray-50 max-w-full truncate" style={{borderColor: tag.color, color: tag.color}}>
+                                                    <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: tag.color}}></div>
+                                                    <span className="truncate">{tag.name}</span>
                                                 </span>
                                               );
                                           })}
                                       </div>
-                                  )}
+
+                                      {/* Action Buttons */}
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                          <div className="relative">
+                                              <button 
+                                                  onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setTagMenuCardId(tagMenuCardId === card.id ? null : card.id);
+                                                  }}
+                                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+                                                  title="Adicionar Tag"
+                                              >
+                                                  <Plus className="w-4 h-4" />
+                                              </button>
+                                              
+                                              {tagMenuCardId === card.id && (
+                                                  <div className="absolute right-0 bottom-full mb-2 bg-white border border-gray-100 shadow-xl rounded-lg p-2 w-48 z-50 animate-in fade-in zoom-in duration-150" onClick={e => e.stopPropagation()}>
+                                                      <div className="text-xs font-semibold text-gray-500 mb-2 px-1">Tags</div>
+                                                      <div className="max-h-40 overflow-y-auto space-y-1 scrollbar-thin">
+                                                          {kanbanState.tags.map(t => {
+                                                              const hasTag = card.tagIds.includes(t.id);
+                                                              return (
+                                                                  <label key={t.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer text-sm transition-colors">
+                                                                      <input type="checkbox" checked={!!hasTag} onChange={(e) => {
+                                                                          const newCards = [...kanbanState.cards];
+                                                                          let cIdx = newCards.findIndex(c => c.id === card.id);
+                                                                          if(cIdx < 0) {
+                                                                              newCards.push({ id: card.id, colId: col.id, tagIds: [], name: card.name });
+                                                                              cIdx = newCards.length - 1;
+                                                                          }
+                                                                          let tags = newCards[cIdx].tagIds;
+                                                                          if(e.target.checked) tags.push(t.id);
+                                                                          else tags = tags.filter(id => id !== t.id);
+                                                                          newCards[cIdx].tagIds = tags;
+                                                                          updateKanbanState({...kanbanState, cards: newCards});
+                                                                      }} className="rounded text-blue-600 focus:ring-blue-500"/>
+                                                                      <div className="w-2 h-2 rounded-full" style={{backgroundColor: t.color}}></div>
+                                                                      <span className="font-medium text-gray-700 truncate">{t.name}</span>
+                                                                  </label>
+                                                              );
+                                                          })}
+                                                          {kanbanState.tags.length === 0 && (
+                                                              <div className="text-xs text-gray-400 p-1">Nenhuma tag criada</div>
+                                                          )}
+                                                      </div>
+                                                  </div>
+                                              )}
+                                          </div>
+                                          <button 
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  if (confirm('Remover esta conversa do Kanban?')) {
+                                                      const newCards = kanbanState.cards.filter(c => c.id !== card.id);
+                                                      updateKanbanState({...kanbanState, cards: newCards});
+                                                  }
+                                              }}
+                                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                              title="Remover do Kanban"
+                                          >
+                                              <Trash2 className="w-4 h-4" />
+                                          </button>
+                                      </div>
+                                  </div>
                               </div>
                           ))}
                       </div>

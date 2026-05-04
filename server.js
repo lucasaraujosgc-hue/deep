@@ -1254,18 +1254,57 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                 
                 const chats = await wrapper.client.getChats();
                 const now = Date.now() / 1000;
-                const simplifiedChats = chats.filter(c => !c.isGroup).filter(c => {
+                const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
                     if (kanbanCards.includes(c.id._serialized)) return true;
                     if (c.unreadCount > 0) return true;
                     if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true; // Last 7 days
                     return false;
-                }).map(c => ({
-                    id: c.id._serialized,
-                    name: c.name || c.id.user,
-                    unreadCount: c.unreadCount,
-                    timestamp: c.timestamp,
-                    isGroup: c.isGroup
-                }));
+                });
+
+                const simplifiedChatsPromises = filteredChats.map(async c => {
+                    let profilePicUrl = null;
+                    let lastMessage = '';
+                    let lastMessageFromMe = false;
+                    let lastMessageTimestamp = c.timestamp;
+                    
+                    try {
+                        profilePicUrl = await wrapper.client.getProfilePicUrl(c.id._serialized);
+                    } catch(e) {}
+
+                    try {
+                        const msgs = await c.fetchMessages({limit: 1});
+                        if (msgs && msgs.length > 0) {
+                            lastMessage = msgs[0].body || (msgs[0].hasMedia ? '[Mídia]' : '');
+                            lastMessageFromMe = msgs[0].fromMe;
+                            lastMessageTimestamp = msgs[0].timestamp;
+                        }
+                    } catch(e) {}
+
+                    let contactName = c.name;
+                    if (!contactName || contactName === c.id.user) {
+                        try {
+                            const contact = await c.getContact();
+                            contactName = contact.name || contact.pushname || c.id.user;
+                        } catch(e) {}
+                    }
+
+                    return {
+                        id: c.id._serialized,
+                        name: contactName,
+                        unreadCount: c.unreadCount,
+                        timestamp: lastMessageTimestamp,
+                        isGroup: c.isGroup,
+                        profilePicUrl,
+                        lastMessage,
+                        lastMessageFromMe
+                    };
+                });
+                
+                const simplifiedChats = await Promise.all(simplifiedChatsPromises);
+                
+                // Sort by recent timestamp
+                simplifiedChats.sort((a, b) => b.timestamp - a.timestamp);
+
                 res.json(simplifiedChats);
             } catch(e) {
                 res.status(500).json({error: e.message});
