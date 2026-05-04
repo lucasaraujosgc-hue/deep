@@ -71,12 +71,31 @@ const FileGallery: React.FC = () => {
           </h2>
           <p className="text-sm text-gray-500">Mídias e documentos enviados e recebidos</p>
         </div>
-        <button 
-            onClick={loadFiles}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-        >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
-        </button>
+        <div className="flex items-center gap-2">
+            <button 
+                onClick={async () => {
+                    if (confirm('Tem certeza que deseja apagar todos os arquivos? Esta ação não pode ser desfeita.')) {
+                        try {
+                            const ids = files.map(f => f.id);
+                            for (const id of ids) {
+                                await api.deleteFileGallery(id);
+                            }
+                            loadFiles();
+                        } catch (e) { alert('Erro ao limpar galeria'); }
+                    }
+                }}
+                disabled={files.length === 0}
+                className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors disabled:opacity-50"
+            >
+                <Trash2 className="w-4 h-4" /> Apagar Todos
+            </button>
+            <button 
+                onClick={loadFiles}
+                className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+            </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

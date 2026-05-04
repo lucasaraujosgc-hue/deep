@@ -9,49 +9,6 @@ const AiFab: React.FC = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Draggable State
-  const [position, setPosition] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 80 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startY: number; initialX: number; initialY: number } | null>(null);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging || !dragRef.current) return;
-        const dx = e.clientX - dragRef.current.startX;
-        const dy = e.clientY - dragRef.current.startY;
-        setPosition({
-            x: dragRef.current.initialX + dx,
-            y: dragRef.current.initialY + dy
-        });
-    };
-    
-    const handleMouseUp = () => {
-        setIsDragging(false);
-    };
-
-    if (isDragging) {
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-    }
-    
-    return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging]);
-
-  const handleDragStart = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      setIsDragging(true);
-      dragRef.current = {
-          startX: e.clientX,
-          startY: e.clientY,
-          initialX: position.x,
-          initialY: position.y
-      };
-  };
-
   const handleSend = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!input.trim() || loading) return;
@@ -62,10 +19,6 @@ const AiFab: React.FC = () => {
       setLoading(true);
 
       try {
-          // Utilizar o mesmo sistema do whats para enviar via AI, mas pra simplicar posso chamar um endpoint dedicado.
-          // Como o backend já tem /api/whatsapp/transcribe, preciso de um endpoint de chat IA puro
-          // Ou simplesmente emular a resposta
-          
           const token = localStorage.getItem('cm_auth_token');
           const res = await fetch('/api/ai/chat', {
               method: 'POST',
@@ -88,13 +41,9 @@ const AiFab: React.FC = () => {
 
   return (
     <>
-      <div 
-        className="fixed z-[100] cursor-grab active:cursor-grabbing flex flex-col items-center gap-2"
-        style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      >
+      <div className="fixed z-[100] right-6 bottom-6 flex flex-col items-center gap-2">
         {!isOpen && (
             <button 
-                onMouseDown={handleDragStart}
                 onClick={() => setIsOpen(true)}
                 className="w-14 h-14 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl hover:scale-105 transition-transform"
             >
@@ -104,14 +53,8 @@ const AiFab: React.FC = () => {
       </div>
 
       {isOpen && (
-          <div 
-              className="fixed z-[101] bg-white rounded-2xl shadow-2xl flex flex-col w-[320px] md:w-[380px] h-[500px] border border-blue-100 overflow-hidden"
-              style={{ left: `${Math.min(position.x, window.innerWidth - 380)}px`, top: `${Math.min(position.y, window.innerHeight - 500)}px` }}
-          >
-              <div 
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 p-3 flex justify-between items-center cursor-grab active:cursor-grabbing"
-                  onMouseDown={handleDragStart}
-              >
+          <div className="fixed z-[101] bottom-6 right-6 bg-white rounded-2xl shadow-2xl flex flex-col w-[320px] md:w-[380px] h-[500px] max-h-[80vh] border border-blue-100 overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-3 flex justify-between items-center cursor-default">
                   <div className="flex items-center gap-2 text-white font-semibold">
                       <Bot className="w-5 h-5"/>
                       Assistente IA

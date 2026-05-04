@@ -70,8 +70,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const mergedCards = waChats.map(chat => {
       const existingCard = kanbanState.cards.find(c => c.id === chat.id._serialized);
       return {
-          id: chat.id._serialized,
-          name: chat.name || chat.id.user,
+          id: chat.id._serialized || '',
+          name: chat.name || (chat.id && chat.id.user) || 'Desconhecido',
           unreadCount: chat.unreadCount,
           lastMessage: chat.lastMessage?.body,
           timestamp: chat.timestamp,
@@ -81,11 +81,16 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   }).filter(card => {
       if (!searchTerm) return true;
       const term = searchTerm.toLowerCase();
-      if (card.name.toLowerCase().includes(term)) return true;
-      if (card.id.toLowerCase().includes(term)) return true;
+      
+      const safeName = card.name || '';
+      const safeId = card.id || '';
+      
+      if (safeName.toLowerCase().includes(term)) return true;
+      if (safeId.toLowerCase().includes(term)) return true;
+      
       const hasMatchingTag = card.tagIds.some(tid => {
           const tag = kanbanState.tags.find(t => t.id === tid);
-          return tag && tag.name.toLowerCase().includes(term);
+          return tag && (tag.name || '').toLowerCase().includes(term);
       });
       return hasMatchingTag;
   });

@@ -686,6 +686,10 @@ const getWaClientWrapper = (username) => {
 
         // --- INTERCEPTADOR DE MENSAGENS (IA) ---
         client.on('message', async (msg) => {
+            if (msg.from.includes('@g.us') || msg.to.includes('@g.us') || msg.isStatus || (msg.id && msg.id.remote && msg.id.remote.includes('@g.us'))) {
+                return;
+            }
+
             const sender = msg.from;
             log(`[WhatsApp Inbound] Mensagem recebida de: ${sender} | Body: ${msg.body?.substring(0, 30)}...`);
 
@@ -721,10 +725,6 @@ const getWaClientWrapper = (username) => {
             }
 
             try {
-                if (msg.from.includes('@g.us') || msg.isStatus) {
-                    return;
-                }
-
                 const db = getDb(username);
                 const settings = await new Promise(resolve => {
                     db.get("SELECT settings FROM user_settings WHERE id = 1", (e, r) => resolve(r ? JSON.parse(r.settings) : null));
@@ -1235,12 +1235,12 @@ app.post('/api/whatsapp/contact', async (req, res) => {
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-app.post('/api/whatsapp/chats', async (req, res) => {
+app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         const chats = await wrapper.client.getChats();
-        const simplifiedChats = chats.map(c => ({
+        const simplifiedChats = chats.filter(c => !c.isGroup).map(c => ({
             id: c.id._serialized,
             name: c.name || c.id.user,
             unreadCount: c.unreadCount,
