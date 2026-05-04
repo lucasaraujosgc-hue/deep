@@ -220,7 +220,7 @@ export const api = {
     return res.blob();
   },
 
-  transcribeWhatsAppAudio: async (msgId: string): Promise<{ text: string }> => {
+  transcribeWhatsAppAudio: async (msgId: string): Promise<{ transcription: string }> => {
     const res = await fetch(`${API_URL}/whatsapp/transcribe/${encodeURIComponent(msgId)}`, { method: 'POST', headers: getAuthHeader() });
     return handleResponse(res);
   },

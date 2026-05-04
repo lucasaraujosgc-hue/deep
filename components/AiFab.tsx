@@ -45,9 +45,17 @@ const AiFab: React.FC = () => {
         {!isOpen && (
             <button 
                 onClick={() => setIsOpen(true)}
-                className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-xl hover:scale-105 transition-transform"
+                className="w-14 h-14 bg-[#2563eb] rounded-full flex items-center justify-center text-white shadow-[0_4px_14px_0_rgba(37,99,235,0.39)] hover:scale-105 hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] transition-all"
             >
-                <Bot className="w-7 h-7" />
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="5" y="8" width="14" height="10" rx="3" />
+                    <line x1="12" y1="8" x2="12" y2="4" />
+                    <line x1="8" y1="4" x2="12" y2="4" />
+                    <line x1="2" y1="13" x2="5" y2="13" />
+                    <line x1="19" y1="13" x2="22" y2="13" />
+                    <line x1="9" y1="11" x2="9" y2="14" />
+                    <line x1="15" y1="11" x2="15" y2="14" />
+                </svg>
             </button>
         )}
       </div>

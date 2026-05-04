@@ -30,6 +30,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [tagMenuCardId, setTagMenuCardId] = useState<string | null>(null);
   const [chatDetailsMap, setChatDetailsMap] = useState<Record<string, { profilePicUrl?: string | null, lastMessage?: string, lastMessageFromMe?: boolean, name?: string, number?: string | null }>>({});
+  const [expandedMediaUrl, setExpandedMediaUrl] = useState<string | null>(null);
+  const [expandedMediaType, setExpandedMediaType] = useState<'image' | 'video' | 'document' | null>(null);
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -43,6 +45,11 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       setLoading(false);
     }
   };
+
+  const activeChatRef = useRef(activeChat);
+  useEffect(() => {
+      activeChatRef.current = activeChat;
+  }, [activeChat]);
 
   useEffect(() => {
     loadWaChats();
@@ -84,15 +91,17 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                return prev;
            });
 
-           if (activeChat && msg && (msg.from === activeChat.id._serialized || msg.to === activeChat.id._serialized)) {
+           const currentActiveChat = activeChatRef.current;
+           if (currentActiveChat && msg && (msg.from === currentActiveChat.id._serialized || msg.to === currentActiveChat.id._serialized)) {
              setChatMessages(prev => [...prev, msg]);
+             setTimeout(scrollToBottom, 100);
            }
         }
       } catch (e) {}
     };
 
     return () => { es.close(); };
-  }, [activeChat]);
+  }, []);
 
   // Combine Kanban Cards with Real Chats
   // Provide defaults for chats that aren't manually assigned yet
@@ -237,8 +246,13 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   };
 
   const [msgLimit, setMsgLimit] = useState(50);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const openChat = async (cardItem: any, fetchHistory: boolean = false) => {
+  const scrollToBottom = () => {
+      messagesEndRef.current?.scrollIntoView();
+  };
+
+  const openChat = async (cardItem: any, fetchHistory: boolean = true) => {
       setActiveChat({ id: { _serialized: cardItem.id }, name: cardItem.name });
       if (!fetchHistory) {
           setChatMessages([]);
@@ -249,8 +263,9 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       
       setChatLoading(true);
       try {
-          const msgs = await api.getWhatsAppMessages(cardItem.id, msgLimit);
-          setChatMessages(msgs.reverse());
+          const msgs = await api.getWhatsAppMessages(cardItem.id, 50);
+          setChatMessages(msgs);
+          setTimeout(scrollToBottom, 100);
       } catch (e) {
           console.error(e);
       } finally {
@@ -264,7 +279,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           setMsgLimit(newLimit);
           setChatLoading(true);
           api.getWhatsAppMessages(activeChat.id._serialized || activeChat.id, newLimit).then(msgs => {
-              setChatMessages(msgs.reverse());
+              setChatMessages(msgs);
           }).finally(() => {
               setChatLoading(false);
           });
@@ -299,7 +314,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           // Update the localized chat messages state to embed the transcription text
           setChatMessages(prev => prev.map(m => {
               if (m.id.id === msgId || m.id._serialized === msgId) {
-                  return { ...m, transcription: res.text };
+                  return { ...m, transcription: res.transcription };
               }
               return m;
           }));
@@ -677,17 +692,49 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                   <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                                       <div className={`max-w-[80%] rounded-xl p-3 shadow-sm ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-gray-100'}`}>
                                           {msgTypeIcon && (
-                                              <div className="flex items-center gap-2 text-gray-500 mb-1 border-b pb-1">
-                                                  {msgTypeIcon}
-                                                  <span className="text-xs font-semibold">{msg.type.toUpperCase()}</span>
-                                                  
-                                                  {(msg.type === 'audio' || msg.type === 'ptt') && !msg.transcription && msgIdStr && (
+                                              <div className="flex flex-col gap-2 mb-1 border-b border-black/5 pb-1">
+                                                  <div className="flex items-center gap-2 text-gray-500">
+                                                      {msgTypeIcon}
+                                                      <span className="text-xs font-semibold">{msg.type.toUpperCase()}</span>
+                                                      
+                                                      {(msg.type === 'audio' || msg.type === 'ptt') && !msg.transcription && msgIdStr && (
+                                                          <button 
+                                                            onClick={() => handleTranscribe(msgIdStr)}
+                                                            disabled={transcribingMap[msgIdStr]}
+                                                            className="ml-2 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 flex items-center min-w-[90px] justify-center"
+                                                          >
+                                                              {transcribingMap[msgIdStr] ? <Loader2 className="w-3 h-3 animate-spin" /> : 'IA: Transcrever'}
+                                                          </button>
+                                                      )}
+                                                  </div>
+                                                  {(msg.type === 'audio' || msg.type === 'ptt') && msgIdStr && (
+                                                      <audio 
+                                                          controls 
+                                                          className="mt-1 h-10 w-full max-w-[240px]" 
+                                                          src={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`} 
+                                                      />
+                                                  )}
+                                                  {(msg.type === 'image' || msg.type === 'video') && msgIdStr && (
+                                                      <img 
+                                                          src={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`} 
+                                                          alt="Media" 
+                                                          className="mt-2 text-xs rounded-lg max-h-[200px] object-cover cursor-pointer hover:opacity-90 border border-gray-200" 
+                                                          onClick={() => {
+                                                              setExpandedMediaUrl(`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`);
+                                                              setExpandedMediaType(msg.type as 'image' | 'video');
+                                                          }}
+                                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                      />
+                                                  )}
+                                                  {msg.type === 'document' && msgIdStr && (
                                                       <button 
-                                                        onClick={() => handleTranscribe(msgIdStr)}
-                                                        disabled={transcribingMap[msgIdStr]}
-                                                        className="ml-2 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 flex items-center min-w-[90px] justify-center"
+                                                          onClick={() => {
+                                                              setExpandedMediaUrl(`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`);
+                                                              setExpandedMediaType('document');
+                                                          }}
+                                                          className="mt-2 w-full flex items-center justify-center p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 text-gray-700 text-sm font-medium transition-colors"
                                                       >
-                                                          {transcribingMap[msgIdStr] ? <Loader2 className="w-3 h-3 animate-spin" /> : 'IA: Transcrever'}
+                                                          Visualizar documento
                                                       </button>
                                                   )}
                                               </div>
@@ -721,6 +768,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                               <div className="text-center text-gray-500 text-sm bg-white/90 py-2 px-4 rounded-xl shadow-sm inline-block">Nenhuma mensagem nesta sessão.</div>
                           </div>
                       )}
+                      
+                      <div ref={messagesEndRef} />
                   </div>
 
                   <form onSubmit={handleSendMessage} className="p-3 bg-slate-100 border-t flex items-end gap-2">
@@ -759,6 +808,29 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           {sendingMsg ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-1"/>}
                       </button>
                   </form>
+              </div>
+          </div>
+      )}
+
+      {expandedMediaUrl && (
+          <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center animate-in fade-in duration-200">
+              <button 
+                  className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 "
+                  onClick={() => {
+                      setExpandedMediaUrl(null);
+                      setExpandedMediaType(null);
+                  }}
+              >
+                  <X className="w-8 h-8" />
+              </button>
+              
+              <div className="max-w-[90vw] max-h-[90vh] overflow-auto flex items-center justify-center">
+                  {(expandedMediaType === 'image' || expandedMediaType === 'video') && (
+                      <img src={expandedMediaUrl} className="max-w-full max-h-[90vh] object-contain rounded-lg" alt="Expanded Media" />
+                  )}
+                  {expandedMediaType === 'document' && (
+                      <iframe src={expandedMediaUrl} className="w-[80vw] h-[80vh] bg-white rounded-lg" title="Document Viewer" />
+                  )}
               </div>
           </div>
       )}

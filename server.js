@@ -1180,7 +1180,7 @@ app.post('/api/whatsapp/send-chat', upload.single('media'), async (req, res) => 
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-app.get('/api/whatsapp/media/:msgId', async (req, res) => {
+app.get('/api/whatsapp/media/:msgId', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
@@ -1198,7 +1198,7 @@ app.get('/api/whatsapp/media/:msgId', async (req, res) => {
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-app.post('/api/whatsapp/transcribe/:msgId', async (req, res) => {
+app.post('/api/whatsapp/transcribe/:msgId', authenticateToken, async (req, res) => {
     try {
         if (!ai) return res.status(400).json({error: 'AI is not enabled'});
         const wrapper = getWaClientWrapper(req.user);
