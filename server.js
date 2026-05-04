@@ -1236,6 +1236,38 @@ app.post('/api/whatsapp/contact', async (req, res) => {
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
+app.get('/api/whatsapp/chat-info/:chatId', authenticateToken, async (req, res) => {
+    try {
+        const wrapper = getWaClientWrapper(req.user);
+        if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
+        
+        const chatId = req.params.chatId;
+        const profilePicUrl = await wrapper.client.getProfilePicUrl(chatId).catch(() => null);
+        const contact = await wrapper.client.getContactById(chatId).catch(() => null);
+        
+        let lastMessage = '';
+        let lastMessageFromMe = false;
+        try {
+            const chat = await wrapper.client.getChatById(chatId);
+            const msgs = await chat.fetchMessages({limit: 1});
+            if (msgs && msgs.length > 0) {
+                lastMessage = msgs[0].body || (msgs[0].hasMedia ? '[Mídia]' : '');
+                lastMessageFromMe = msgs[0].fromMe;
+            }
+        } catch(e) {}
+        
+        res.json({
+            profilePicUrl,
+            pushname: contact ? (contact.pushname || contact.name) : null,
+            number: contact ? contact.number : null,
+            lastMessage,
+            lastMessageFromMe
+        });
+    } catch(e) {
+        res.status(500).json({error: e.message});
+    }
+});
+
 app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
@@ -1262,24 +1294,6 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                 });
 
                 const simplifiedChatsPromises = filteredChats.map(async c => {
-                    let profilePicUrl = null;
-                    let lastMessage = '';
-                    let lastMessageFromMe = false;
-                    let lastMessageTimestamp = c.timestamp;
-                    
-                    try {
-                        profilePicUrl = await wrapper.client.getProfilePicUrl(c.id._serialized);
-                    } catch(e) {}
-
-                    try {
-                        const msgs = await c.fetchMessages({limit: 1});
-                        if (msgs && msgs.length > 0) {
-                            lastMessage = msgs[0].body || (msgs[0].hasMedia ? '[Mídia]' : '');
-                            lastMessageFromMe = msgs[0].fromMe;
-                            lastMessageTimestamp = msgs[0].timestamp;
-                        }
-                    } catch(e) {}
-
                     let contactName = c.name;
                     if (!contactName || contactName === c.id.user) {
                         try {
@@ -1292,11 +1306,11 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                         id: c.id._serialized,
                         name: contactName,
                         unreadCount: c.unreadCount,
-                        timestamp: lastMessageTimestamp,
+                        timestamp: c.timestamp,
                         isGroup: c.isGroup,
-                        profilePicUrl,
-                        lastMessage,
-                        lastMessageFromMe
+                        profilePicUrl: null,
+                        lastMessage: '',
+                        lastMessageFromMe: false
                     };
                 });
                 

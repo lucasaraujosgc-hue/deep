@@ -29,6 +29,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [transcribingMap, setTranscribingMap] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [tagMenuCardId, setTagMenuCardId] = useState<string | null>(null);
+  const [chatDetailsMap, setChatDetailsMap] = useState<Record<string, { profilePicUrl?: string | null, lastMessage?: string, lastMessageFromMe?: boolean, name?: string }>>({});
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -53,10 +54,38 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'whatsapp_message') {
-           // Reload chats to update last message
-           loadWaChats();
-           if (activeChat && data.message && (data.message.from === activeChat.id._serialized || data.message.to === activeChat.id._serialized)) {
-             setChatMessages(prev => [...prev, data.message]);
+           const msg = data.message;
+           const chatId = msg.fromMe ? msg.to : msg.from;
+           const isMedia = msg.hasMedia || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'document';
+           const previewText = msg.body || (isMedia ? '[Mídia]' : '');
+           
+           setChatDetailsMap(prev => ({
+               ...prev,
+               [chatId]: {
+                   ...prev[chatId],
+                   lastMessage: previewText,
+                   lastMessageFromMe: msg.fromMe,
+               }
+           }));
+
+           setWaChats(prev => {
+               const idx = prev.findIndex(c => (c.id._serialized || c.id) === chatId);
+               if (idx >= 0) {
+                   const newChats = [...prev];
+                   newChats[idx] = { 
+                       ...newChats[idx], 
+                       unreadCount: msg.fromMe ? 0 : (newChats[idx].unreadCount + 1),
+                       timestamp: msg.timestamp 
+                   };
+                   return newChats.sort((a, b) => b.timestamp - a.timestamp);
+               }
+               // Optionally call loadWaChats() if it's a completely new chat
+               loadWaChats();
+               return prev;
+           });
+
+           if (activeChat && msg && (msg.from === activeChat.id._serialized || msg.to === activeChat.id._serialized)) {
+             setChatMessages(prev => [...prev, msg]);
            }
         }
       } catch (e) {}
@@ -71,13 +100,15 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const mergedCards = waChats.map(chat => {
       const chatId = typeof chat.id === 'object' ? chat.id._serialized : chat.id;
       const existingCard = kanbanState.cards.find(c => c.id === chatId);
+      const details = chatDetailsMap[chatId] || {};
+      
       return {
           id: chatId || '',
-          name: chat.name || (typeof chat.id === 'object' ? chat.id.user : chat.id?.split('@')[0]) || 'Desconhecido',
+          name: details.name || chat.name || (typeof chat.id === 'object' ? chat.id.user : chat.id?.split('@')[0]) || 'Desconhecido',
           unreadCount: chat.unreadCount,
-          lastMessage: chat.lastMessage,
-          lastMessageFromMe: chat.lastMessageFromMe,
-          profilePicUrl: chat.profilePicUrl,
+          lastMessage: details.lastMessage !== undefined ? details.lastMessage : chat.lastMessage,
+          lastMessageFromMe: details.lastMessageFromMe !== undefined ? details.lastMessageFromMe : chat.lastMessageFromMe,
+          profilePicUrl: details.profilePicUrl !== undefined ? details.profilePicUrl : chat.profilePicUrl,
           timestamp: chat.timestamp,
           colId: existingCard ? existingCard.colId : (firstColId || ''),
           tagIds: existingCard ? existingCard.tagIds : []
@@ -98,6 +129,39 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       });
       return hasMatchingTag;
   });
+
+  useEffect(() => {
+     // Lazy load chat info for rendered cards
+     const fetchMissingInfo = async () => {
+         const missingIds = mergedCards
+             .map(c => c.id)
+             .filter(id => !chatDetailsMap[id] || chatDetailsMap[id].profilePicUrl === undefined);
+
+         if (missingIds.length === 0) return;
+
+         // Fetch 1 by 1 or in batches
+         for (const id of missingIds) {
+             // Avoid refetching immediately if already in progress by setting a placeholder
+             setChatDetailsMap(prev => ({ ...prev, [id]: { ...(prev[id] || {}), profilePicUrl: null } }));
+             try {
+                 const info = await api.getWhatsAppChatInfo(id);
+                 setChatDetailsMap(prev => ({
+                     ...prev,
+                     [id]: {
+                         profilePicUrl: info.profilePicUrl,
+                         lastMessage: info.lastMessage,
+                         lastMessageFromMe: info.lastMessageFromMe,
+                         name: info.pushname
+                     }
+                 }));
+             } catch(e) {}
+         }
+     };
+
+     if (mergedCards.length > 0) {
+         fetchMissingInfo();
+     }
+  }, [waChats, kanbanState.cards]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();

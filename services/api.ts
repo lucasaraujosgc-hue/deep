@@ -189,6 +189,11 @@ export const api = {
     return handleResponse(res);
   },
 
+  getWhatsAppChatInfo: async (chatId: string): Promise<any> => {
+    const res = await fetch(`${API_URL}/whatsapp/chat-info/${encodeURIComponent(chatId)}`, { headers: getAuthHeader() });
+    return handleResponse(res);
+  },
+
   getWhatsAppMessages: async (chatId: string, limit: number = 50): Promise<any[]> => {
     const res = await fetch(`${API_URL}/whatsapp/messages/${encodeURIComponent(chatId)}?limit=${limit}`, { headers: getAuthHeader() });
     return handleResponse(res);
