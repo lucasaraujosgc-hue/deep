@@ -525,25 +525,25 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       </div>
 
       {/* Kanban Board */}
-      <div className="flex-1 overflow-x-auto flex gap-3 pb-4">
+      <div className="flex-1 overflow-x-auto flex gap-4 pb-4">
           {kanbanState.columns.map(col => {
               const colCards = mergedCards.filter(c => c.colId === col.id);
               
               return (
                   <div 
                       key={col.id} 
-                      className="flex-shrink-0 w-52 bg-gray-100 rounded-xl p-2 flex flex-col h-full overflow-hidden"
+                      className="flex-shrink-0 w-80 bg-gray-100 rounded-xl p-3 flex flex-col h-full overflow-hidden"
                       onDragOver={handleDragOver}
                       onDrop={(e) => handleDrop(e, col.id)}
                   >
-                      <div className="mb-2 pb-1.5 border-b-2 flex items-center justify-between" style={{ borderColor: col.color }}>
-                          <h3 className="font-bold text-gray-700 flex items-center gap-1.5 text-xs">
+                      <div className="mb-3 pb-2 border-b-2 flex items-center justify-between" style={{ borderColor: col.color }}>
+                          <h3 className="font-bold text-gray-700 flex items-center gap-2">
                              {col.title}
-                             <span className="bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full text-[10px] font-semibold">{colCards.length}</span>
+                             <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-semibold">{colCards.length}</span>
                           </h3>
                       </div>
                       
-                      <div className="flex-1 overflow-y-auto space-y-2 pr-1.5 scrollbar-thin">
+                      <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
                           {colCards.map(card => (
                               <div 
                                   key={card.id}
@@ -553,22 +553,22 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       e.dataTransfer.effectAllowed = "move";
                                   }}
                                   onClick={() => openChat(card)}
-                                  className="bg-white p-2.5 rounded-lg shadow-sm border border-gray-100 cursor-pointer hover:shadow-md hover:border-blue-300 transition-all active:cursor-grabbing border-l-4 group"
+                                  className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-lg hover:border-blue-300 transition-all active:cursor-grabbing border-l-4 group"
                                   style={{ borderLeftColor: col.color }}
                               >
-                                  <div className="flex items-center gap-2 mb-1.5">
-                                      <div className="w-7 h-7 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
+                                  <div className="flex items-center gap-3 mb-2">
+                                      <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-200">
                                           {card.profilePicUrl ? (
                                               <img src={card.profilePicUrl} alt={card.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                           ) : (
-                                              <User className="w-full h-full p-1.5 text-gray-400" />
+                                              <User className="w-full h-full p-2 text-gray-400" />
                                           )}
                                       </div>
                                       <div className="flex-1 min-w-0">
                                           <div className="flex justify-between items-start">
-                                              <h4 className="font-semibold text-gray-800 text-[11px] leading-tight truncate">{card.name}</h4>
+                                              <h4 className="font-semibold text-gray-800 text-sm truncate">{card.name}</h4>
                                               {card.unreadCount > 0 && (
-                                                  <span className="bg-green-500 text-white text-[9px] px-1 py-px rounded-full font-bold ml-1">
+                                                  <span className="bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                                                       {card.unreadCount}
                                                   </span>
                                               )}
@@ -576,19 +576,19 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       </div>
                                   </div>
 
-                                  <div className="flex items-center gap-1 text-[10px] text-gray-500 mb-1.5 truncate">
-                                      {card.lastMessageFromMe && <CheckCircle2 className="w-3 h-3 text-blue-500 flex-shrink-0" />}
-                                      <p className="truncate leading-tight">{card.lastMessage || 'Sem mensagem'}</p>
+                                  <div className="flex items-center gap-1 text-sm text-gray-500 mb-2 truncate">
+                                      {card.lastMessageFromMe && <CheckCircle2 className="w-4 h-4 text-blue-500 flex-shrink-0" />}
+                                      <p className="truncate">{card.lastMessage || 'Sem mensagem'}</p>
                                   </div>
                                   
-                                  <div className="flex items-center justify-between mt-2">
+                                  <div className="flex items-center justify-between mt-3">
                                       <div className="flex flex-wrap gap-1 items-center flex-1 min-w-0">
                                           {card.tagIds.map(tid => {
                                               const tag = kanbanState.tags.find(t => t.id === tid);
                                               if (!tag) return null;
                                               return (
-                                                <span key={tag.id} className="text-[9px] px-1.5 py-0.5 border rounded-full flex items-center gap-1 font-medium bg-gray-50 max-w-full truncate" style={{borderColor: tag.color, color: tag.color}}>
-                                                    <div className="w-1 h-1 rounded-full" style={{backgroundColor: tag.color}}></div>
+                                                <span key={tag.id} className="text-xs px-2 py-0.5 border rounded-full flex items-center gap-1 font-medium bg-gray-50 max-w-full truncate" style={{borderColor: tag.color, color: tag.color}}>
+                                                    <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: tag.color}}></div>
                                                     <span className="truncate">{tag.name}</span>
                                                 </span>
                                               );
@@ -863,42 +863,19 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                               ) : null}
 
                               {/* Mensagens */}
-                              {(() => {
-                                  let lastDateStr = '';
-                                  const todayStr = new Date().toLocaleDateString('pt-BR');
-                                  const yesterday = new Date();
-                                  yesterday.setDate(yesterday.getDate() - 1);
-                                  const yesterdayStr = yesterday.toLocaleDateString('pt-BR');
+                              {chatMessages.map((msg, idx) => {
+                                  const isMe = msg.fromMe;
+                                  let msgTypeIcon = null;
+                                  if(msg.type === 'image') msgTypeIcon = <ImageIcon className="w-4 h-4"/>;
+                                  if(msg.type === 'document') msgTypeIcon = <FileText className="w-4 h-4"/>;
+                                  if(msg.type === 'audio' || msg.type === 'ptt') msgTypeIcon = <Music className="w-4 h-4"/>;
 
-                                  return chatMessages.map((msg, idx) => {
-                                      const isMe = msg.fromMe;
-                                      let msgTypeIcon = null;
-                                      if(msg.type === 'image') msgTypeIcon = <ImageIcon className="w-4 h-4"/>;
-                                      if(msg.type === 'document') msgTypeIcon = <FileText className="w-4 h-4"/>;
-                                      if(msg.type === 'audio' || msg.type === 'ptt') msgTypeIcon = <Music className="w-4 h-4"/>;
+                                  const msgIdStr = msg.id?.id || msg.id?._serialized;
+                                  const isOptimistic = msg._optimistic;
 
-                                      const msgIdStr = msg.id?.id || msg.id?._serialized;
-                                      const isOptimistic = msg._optimistic;
-
-                                      const msgDateStr = new Date(msg.timestamp * 1000).toLocaleDateString('pt-BR');
-                                      const showDateSeparator = msgDateStr !== lastDateStr;
-                                      lastDateStr = msgDateStr;
-                                      
-                                      let dateLabel = msgDateStr;
-                                      if (msgDateStr === todayStr) dateLabel = 'HOJE';
-                                      else if (msgDateStr === yesterdayStr) dateLabel = 'ONTEM';
-
-                                      return (
-                                          <React.Fragment key={msgIdStr || idx}>
-                                              {showDateSeparator && (
-                                                  <div className="flex justify-center my-3">
-                                                      <span className="bg-[#e1f3fb] text-gray-600 text-xs font-medium px-3 py-1 rounded-md shadow-sm border border-gray-200/50">
-                                                          {dateLabel}
-                                                      </span>
-                                                  </div>
-                                              )}
-                                              <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                                  <div className={`max-w-[80%] rounded-xl p-3 shadow-sm ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-gray-100'} ${isOptimistic ? 'opacity-70' : ''}`}>
+                                  return (
+                                      <div key={msgIdStr || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                          <div className={`max-w-[80%] rounded-xl p-3 shadow-sm ${isMe ? 'bg-green-100 rounded-tr-none' : 'bg-white rounded-tl-none border border-gray-100'} ${isOptimistic ? 'opacity-70' : ''}`}>
                                               {msgTypeIcon && (
                                                   <div className="flex flex-col gap-2 mb-1 border-b border-black/5 pb-1">
                                                       <div className="flex items-center gap-2 text-gray-500">
@@ -979,9 +956,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                               </div>
                                           </div>
                                       </div>
-                                    </React.Fragment>
                                   );
-                              })})()}
+                              })}
                           </>
                       )}
                       
