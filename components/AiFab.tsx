@@ -92,9 +92,8 @@ const AiFab: React.FC = () => {
       {/* Janela do chat */}
       {isOpen && (
         <div
-          style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999 }}
-          className="bg-white rounded-2xl shadow-2xl flex flex-col border border-blue-100 overflow-hidden"
           style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999, width: '360px', height: '520px', maxHeight: '85vh' }}
+          className="bg-white rounded-2xl shadow-2xl flex flex-col border border-blue-100 overflow-hidden"
         >
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 flex justify-between items-center shrink-0">
