@@ -794,11 +794,26 @@ const getWaClientWrapper = (username) => {
                     return;
                 }
 
-                const authorizedNumber = settings.dailySummaryNumber.replace(/\D/g, ''); 
-                const senderNumber = msg.from.replace('@c.us', '').replace(/\D/g, '');
+                const authorizedNumber = settings.dailySummaryNumber.replace(/\D/g, '');
 
-                if (!senderNumber.endsWith(authorizedNumber)) {
-                    return; 
+                // Suporte a @c.us (número normal) e @lid (LID do WhatsApp)
+                // LID fixo do operador autorizado
+                const AUTHORIZED_LID = '140368205074641@lid';
+
+                const isLid = msg.from.endsWith('@lid');
+                let isAuthorized = false;
+
+                if (isLid) {
+                    // Verifica se o LID bate com o LID autorizado
+                    isAuthorized = (msg.from === AUTHORIZED_LID);
+                } else {
+                    // Verifica número normal via dailySummaryNumber
+                    const senderNumber = msg.from.replace('@c.us', '').replace(/\D/g, '');
+                    isAuthorized = senderNumber.endsWith(authorizedNumber);
+                }
+
+                if (!isAuthorized) {
+                    return;
                 }
 
                 if (settings.aiEnabled === false) {
