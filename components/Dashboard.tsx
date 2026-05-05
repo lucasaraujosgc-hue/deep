@@ -480,7 +480,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   }
 
   return (
-    <div className="h-full flex flex-col space-y-4" style={{ zoom: 0.80 }}>
+    <div className="h-full flex flex-col space-y-4" style={{ zoom: 1.0 }}>
       {/* Top Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100 gap-4">
         <div>
