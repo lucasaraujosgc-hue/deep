@@ -233,7 +233,7 @@ const App: React.FC = () => {
         </div>
       </main>
       
-      {userSettings.aiEnabled !== false && <AiFab />}
+      <AiFab />
     </div>
   );
 };
