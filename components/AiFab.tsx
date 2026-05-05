@@ -41,7 +41,7 @@ const AiFab: React.FC = () => {
 
   return (
     <>
-      <div className="fixed z-[100] right-6 bottom-6 flex flex-col items-center gap-2">
+      <div className="fixed z-[9999] right-6 bottom-6 flex flex-col items-center gap-2">
         {!isOpen && (
             <button 
                 onClick={() => setIsOpen(true)}
@@ -61,7 +61,7 @@ const AiFab: React.FC = () => {
       </div>
 
       {isOpen && (
-          <div className="fixed z-[101] bottom-6 right-6 bg-white rounded-2xl shadow-2xl flex flex-col w-[320px] md:w-[380px] h-[500px] max-h-[80vh] border border-blue-100 overflow-hidden">
+          <div className="fixed z-[10000] bottom-6 right-6 bg-white rounded-2xl shadow-2xl flex flex-col w-[320px] md:w-[380px] h-[500px] max-h-[80vh] border border-blue-100 overflow-hidden">
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-3 flex justify-between items-center cursor-default">
                   <div className="flex items-center gap-2 text-white font-semibold">
                       <Bot className="w-5 h-5"/>

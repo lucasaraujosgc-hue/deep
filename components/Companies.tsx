@@ -16,6 +16,7 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -178,8 +179,9 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
       
       const matchesSearch = nameMatch || docMatch || emailMatch;
       const matchesType = typeFilter ? company.type === typeFilter : true;
+      const matchesTag = tagFilter ? (company.categories || []).includes(tagFilter) : true;
 
-      return matchesSearch && matchesType;
+      return matchesSearch && matchesType && matchesTag;
   });
 
   const toggleCategory = (catId: string) => {
@@ -250,6 +252,16 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
             <option value="">Todos os Tipos</option>
             <option value="CNPJ">CNPJ</option>
             <option value="CPF">CPF</option>
+          </select>
+          <select 
+            className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+          >
+            <option value="">Todas as Tags</option>
+            {userSettings.companyCategories?.map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
           </select>
         </div>
 
