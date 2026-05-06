@@ -791,66 +791,50 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           <div className="flex justify-center p-10"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
                       ) : (
                           <>
-                              {/* Botão "Carregar mais antigas" do banco (scroll infinito) */}
-                              {chatMessages.length > 0 && (
-                                  <div className="flex justify-center mb-2">
+                              {/* Topo da conversa: controles de histórico */}
+                              <div className="flex flex-col items-center gap-2 mb-3">
+
+                                  {/* Carregar mais antigas do banco (sempre visível se há msgs) */}
+                                  {chatMessages.length > 0 && (
                                       <button
                                           onClick={loadMoreMessages}
                                           disabled={chatLoading}
-                                          className="text-sm bg-white/90 border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow-sm hover:bg-white flex items-center gap-2 transition-all"
+                                          className="text-sm bg-white/90 border border-gray-200 text-gray-600 px-4 py-1.5 rounded-full shadow-sm hover:bg-white flex items-center gap-2 transition-all disabled:opacity-50"
                                       >
                                           {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                                           Carregar mais antigas
                                       </button>
-                                  </div>
-                              )}
+                                  )}
 
-                              {/* Botão principal "Carregar histórico (45 dias)" */}
-                              {!historyLoaded[activeChat.id._serialized] && !syncStatus[activeChat.id._serialized]?.synced && (
-                                  <div className="flex justify-center mb-3">
-                                      <button
-                                          onClick={loadHistoryFrom45Days}
-                                          disabled={isLoadingHistory}
-                                          className="text-sm bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-full shadow-md flex items-center gap-2 font-medium transition-all disabled:opacity-60"
-                                      >
-                                          {isLoadingHistory
-                                              ? <><Loader2 className="w-4 h-4 animate-spin" /> Carregando histórico...</>
-                                              : <><History className="w-4 h-4" /> Carregar histórico (45 dias)</>
-                                          }
-                                      </button>
-                                  </div>
-                              )}
+                                  {/* Sincronizar com WhatsApp (45 dias) - sempre disponível */}
+                                  <button
+                                      onClick={loadHistoryFrom45Days}
+                                      disabled={isLoadingHistory}
+                                      className="text-sm bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-full shadow-md flex items-center gap-2 font-medium transition-all disabled:opacity-60"
+                                  >
+                                      {isLoadingHistory
+                                          ? <><Loader2 className="w-4 h-4 animate-spin" /> Sincronizando...</>
+                                          : <><History className="w-4 h-4" /> {(historyLoaded[activeChat.id._serialized] || syncStatus[activeChat.id._serialized]?.synced) ? 'Atualizar histórico' : 'Carregar histórico (45 dias)'}</>
+                                      }
+                                  </button>
 
-                              {/* Mensagem de histórico já sincronizado */}
-                              {(historyLoaded[activeChat.id._serialized] || syncStatus[activeChat.id._serialized]?.synced) && (
-                                  <div className="flex justify-center mb-2">
-                                      <span className="text-xs bg-white/70 text-gray-500 px-3 py-1 rounded-full">
-                                          ✅ Histórico sincronizado •{' '}
+                                  {/* Badge de última sync */}
+                                  {(historyLoaded[activeChat.id._serialized] || syncStatus[activeChat.id._serialized]?.synced) && (
+                                      <span className="text-[11px] bg-white/70 text-gray-400 px-3 py-0.5 rounded-full">
+                                          ✅ Última sync:{' '}
                                           {syncStatus[activeChat.id._serialized]?.lastSync
                                               ? new Date(syncStatus[activeChat.id._serialized].lastSync! * 1000).toLocaleDateString('pt-BR')
                                               : 'recentemente'
                                           }
                                       </span>
-                                  </div>
-                              )}
+                                  )}
+                              </div>
 
                               {chatMessages.length === 0 && !chatLoading ? (
-                                  <div className="flex flex-col items-center justify-center mt-10 gap-3">
+                                  <div className="flex flex-col items-center justify-center mt-6 gap-2">
                                       <div className="text-center text-gray-500 text-sm bg-white/90 py-3 px-5 rounded-xl shadow-sm inline-block">
-                                          Nenhuma mensagem local encontrada.
+                                          Nenhuma mensagem local. Clique em "Carregar histórico" acima.
                                       </div>
-                                      {!historyLoaded[activeChat.id._serialized] && !syncStatus[activeChat.id._serialized]?.synced && (
-                                          <button
-                                              onClick={loadHistoryFrom45Days}
-                                              disabled={isLoadingHistory}
-                                              className="text-sm bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-full shadow-md flex items-center gap-2 font-medium"
-                                          >
-                                              {isLoadingHistory
-                                                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</>
-                                                  : <><History className="w-4 h-4" /> Carregar histórico (45 dias)</>
-                                              }
-                                          </button>
-                                      )}
                                   </div>
                               ) : null}
 
