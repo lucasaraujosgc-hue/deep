@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -212,25 +211,33 @@ const App: React.FC = () => {
         onLogout={handleLogout}
       />
       
-      <main className="flex-1 overflow-auto w-full relative">
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-30">
-          <h2 className="text-lg font-semibold text-gray-700 capitalize">
-            {activePage === 'bulksend' ? 'Envio em Massa' : activePage === 'settings' ? 'Usuário' : activePage === 'send' ? 'Envio' : activePage}
-          </h2>
-          <div className="flex items-center gap-4">
-             <div className="text-sm text-right hidden sm:block">
-                <p className="font-bold text-gray-700">Lucas Araújo</p>
-                <p className="text-gray-500 text-xs">Contador | CRC-BA 046968/O</p>
-             </div>
-             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold border-2 border-white shadow-sm">
-                LA
-             </div>
-          </div>
-        </header>
+      <main className="flex-1 overflow-hidden w-full relative flex flex-col">
+        {activePage !== 'dashboard' && (
+          <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-30 shrink-0">
+            <h2 className="text-lg font-semibold text-gray-700 capitalize">
+              {activePage === 'bulksend' ? 'Envio em Massa' : activePage === 'settings' ? 'Usuário' : activePage === 'send' ? 'Envio' : activePage}
+            </h2>
+            <div className="flex items-center gap-4">
+               <div className="text-sm text-right hidden sm:block">
+                  <p className="font-bold text-gray-700">Lucas Araújo</p>
+                  <p className="text-gray-500 text-xs">Contador | CRC-BA 046968/O</p>
+               </div>
+               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold border-2 border-white shadow-sm">
+                  LA
+               </div>
+            </div>
+          </header>
+        )}
 
-        <div className="p-6 max-w-7xl mx-auto pb-20 h-[calc(100vh-73px)]">
-          {renderContent()}
-        </div>
+        {activePage === 'dashboard' ? (
+          <div className="flex-1 overflow-hidden">
+            {renderContent()}
+          </div>
+        ) : (
+          <div className="p-6 max-w-7xl mx-auto pb-20 flex-1 overflow-auto">
+            {renderContent()}
+          </div>
+        )}
       </main>
       
       <AiFab />
