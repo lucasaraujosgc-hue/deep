@@ -370,12 +370,12 @@ const assistantTools = [
     },
     {
         name: "set_personal_reminder",
-        description: "Define um lembrete pessoal para o usuário. Use para 'me lembre de X em Y minutos' ou 'todo dia X'.",
+        description: "Define um lembrete pessoal para o usuário. Use para 'me lembre de X em Y minutos/horas' ou 'todo dia X'. IMPORTANTE: Calcule o datetime ISO 8601 correto somando o tempo relativo à hora atual fornecida no system prompt.",
         parameters: {
             type: Type.OBJECT,
             properties: {
                 message: { type: Type.STRING, description: "O que deve ser lembrado." },
-                datetime: { type: Type.STRING, description: "Data e hora exata ISO 8601 (ex: 2024-05-10T14:30:00). Calcule baseando-se na hora atual informada no system prompt." },
+                datetime: { type: Type.STRING, description: "Data e hora exata ISO 8601 (ex: 2026-05-10T14:30:00). Calcule baseando-se na hora atual informada no system prompt." },
                 recurrence: { type: Type.STRING, enum: ["unico", "diaria", "semanal", "mensal", "anual"], description: "Padrão: unico." }
             },
             required: ["message", "datetime"]
@@ -383,7 +383,7 @@ const assistantTools = [
     },
     {
         name: "send_message_to_company",
-        description: "ENVIA uma mensagem REAL (Email e/ou WhatsApp) para uma empresa cadastrada.",
+        description: "ENVIA uma mensagem REAL (Email e/ou WhatsApp) para uma empresa cadastrada. Use SEMPRE que o usuário pedir para enviar/mandar mensagem para uma empresa.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -401,8 +401,20 @@ const assistantTools = [
         }
     },
     {
+        name: "send_message_to_phone",
+        description: "Envia mensagem WhatsApp para um número de telefone específico (não necessariamente uma empresa cadastrada).",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                phone: { type: Type.STRING, description: "Número com DDI+DDD, ex: 5575999999999" },
+                message: { type: Type.STRING, description: "Texto da mensagem." }
+            },
+            required: ["phone", "message"]
+        }
+    },
+    {
         name: "search_company",
-        description: "Consulta dados de leitura de uma empresa.",
+        description: "Consulta dados de uma empresa (email, whatsapp, tipo, documentos).",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -412,14 +424,58 @@ const assistantTools = [
         }
     },
     {
+        name: "list_companies",
+        description: "Lista todas as empresas cadastradas, com opção de filtro por tipo.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                type_filter: { type: Type.STRING, enum: ["MEI", "Simples", "Lucro Presumido", "todas"], description: "Filtro por tipo. Use 'todas' se não especificado." }
+            }
+        }
+    },
+    {
+        name: "create_kanban_tag",
+        description: "Cria uma nova tag no Kanban WhatsApp.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                name: { type: Type.STRING, description: "Nome da tag." },
+                color: { type: Type.STRING, description: "Cor hex opcional, ex: #FF5733. Se não informado, será gerada automaticamente." }
+            },
+            required: ["name"]
+        }
+    },
+    {
+        name: "add_tag_to_contact",
+        description: "Adiciona uma tag existente a um contato/chat no Kanban.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                phone: { type: Type.STRING, description: "Número do contato com DDI+DDD, ex: 5575999999999" },
+                tag_name: { type: Type.STRING, description: "Nome da tag a adicionar." }
+            },
+            required: ["phone", "tag_name"]
+        }
+    },
+    {
+        name: "consult_sent_history",
+        description: "Consulta o histórico de envios de documentos recentes.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                limit: { type: Type.NUMBER, description: "Quantidade de registros. Padrão: 10." }
+            }
+        }
+    },
+    {
         name: "manage_memory",
-        description: "Salva/Busca informações gerais (treinos, estudos).",
+        description: "Salva ou busca informações duradouras na memória do assistente (anotações, preferências, dados importantes).",
         parameters: {
             type: Type.OBJECT,
             properties: {
                 action: { type: Type.STRING, enum: ["save", "search"] },
-                topic: { type: Type.STRING },
-                content: { type: Type.STRING }
+                topic: { type: Type.STRING, description: "Tema ou título da memória." },
+                content: { type: Type.STRING, description: "Conteúdo a salvar (obrigatório em 'save')." }
             },
             required: ["action", "topic"]
         }
@@ -553,10 +609,91 @@ const executeTool = async (name, args, db, username) => {
 
     if (name === "search_company") {
         return new Promise(resolve => {
-            db.all("SELECT id, name, docNumber, email, whatsapp FROM companies WHERE name LIKE ? OR docNumber LIKE ? LIMIT 5",
+            db.all("SELECT id, name, docNumber, email, whatsapp, type FROM companies WHERE name LIKE ? OR docNumber LIKE ? LIMIT 5",
             [`%${args.name_or_doc}%`, `%${args.name_or_doc}%`], (err, rows) => {
                 if(err) resolve("Erro na busca.");
                 else resolve(rows.length ? JSON.stringify(rows) : "Nenhuma empresa encontrada.");
+            });
+        });
+    }
+
+    // Enviar mensagem para número de telefone direto
+    if (name === "send_message_to_phone") {
+        const waWrapper = getWaClientWrapper(username);
+        if (!waWrapper || waWrapper.status !== 'connected') {
+            return "WhatsApp não está conectado. Impossível enviar a mensagem.";
+        }
+        try {
+            let phone = (args.phone || '').replace(/\D/g, '');
+            if (!phone.startsWith('55')) phone = '55' + phone;
+            const chatId = `${phone}@c.us`;
+            await safeSendMessage(waWrapper.client, chatId, args.message);
+            return `✅ Mensagem enviada para ${args.phone}.`;
+        } catch (e) {
+            return `❌ Erro ao enviar mensagem: ${e.message}`;
+        }
+    }
+
+    // Listar empresas
+    if (name === "list_companies") {
+        return new Promise(resolve => {
+            let sql = "SELECT id, name, docNumber, type, email, whatsapp FROM companies";
+            const params = [];
+            if (args.type_filter && args.type_filter !== 'todas') {
+                sql += " WHERE type = ?";
+                params.push(args.type_filter);
+            }
+            sql += " ORDER BY name ASC LIMIT 30";
+            db.all(sql, params, (err, rows) => {
+                if (err) resolve("Erro ao listar empresas: " + err.message);
+                else if (!rows || rows.length === 0) resolve("Nenhuma empresa encontrada com esse filtro.");
+                else resolve(`${rows.length} empresa(s) encontrada(s):\n` + rows.map(r => `• ${r.name} (${r.type || 'N/A'}) | WA: ${r.whatsapp || '-'} | Email: ${r.email || '-'}`).join('\n'));
+            });
+        });
+    }
+
+    // Criar tag no Kanban
+    if (name === "create_kanban_tag") {
+        return new Promise((resolve) => {
+            const tagId = `tag-${Date.now()}`;
+            const color = args.color || ('#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'));
+            db.run("INSERT INTO tags (id, name, color) VALUES (?, ?, ?)", [tagId, args.name, color], function(err) {
+                if (err) resolve("Erro ao criar tag: " + err.message);
+                else {
+                    resolve(`✅ Tag "${args.name}" criada com cor ${color}.`);
+                }
+            });
+        });
+    }
+
+    // Adicionar tag a contato
+    if (name === "add_tag_to_contact") {
+        return new Promise((resolve) => {
+            let phone = (args.phone || '').replace(/\D/g, '');
+            if (!phone.startsWith('55')) phone = '55' + phone;
+            const chatId = `${phone}@c.us`;
+
+            db.get("SELECT id FROM chats WHERE phone = ? OR id = ?", [phone, chatId], (err, chat) => {
+                if (!chat) { resolve(`❌ Contato com número ${args.phone} não encontrado no Kanban.`); return; }
+                db.get("SELECT id FROM tags WHERE name LIKE ?", [`%${args.tag_name}%`], (err2, tag) => {
+                    if (!tag) { resolve(`❌ Tag "${args.tag_name}" não encontrada. Use 'criar tag' primeiro.`); return; }
+                    db.run("INSERT OR IGNORE INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [chat.id, tag.id], function(err3) {
+                        if (err3) resolve("Erro ao adicionar tag: " + err3.message);
+                        else resolve(`✅ Tag "${args.tag_name}" adicionada ao contato ${args.phone}.`);
+                    });
+                });
+            });
+        });
+    }
+
+    // Consultar histórico de envios
+    if (name === "consult_sent_history") {
+        const limit = args.limit || 10;
+        return new Promise(resolve => {
+            db.all("SELECT companyName, docName, category, sentAt, channels, status FROM sent_logs ORDER BY id DESC LIMIT ?", [limit], (err, rows) => {
+                if (err) resolve("Erro ao consultar histórico.");
+                else if (!rows || rows.length === 0) resolve("Nenhum envio registrado ainda.");
+                else resolve(`Últimos ${rows.length} envio(s):\n` + rows.map(r => `• ${r.sentAt} | ${r.companyName} | ${r.docName} (${r.category}) | ${r.status}`).join('\n'));
             });
         });
     }
@@ -616,16 +753,35 @@ const processAI = async (username, userMessage, mediaPart = null) => {
     const currentTimeStr = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     const currentISO = now.toISOString();
 
-    const systemInstruction = `Você é o "Contábil Bot", um assistente eficiente.
-    DATA/HORA ATUAL: ${currentTimeStr} (ISO: ${currentISO}).
-    Use essa data para calcular vencimentos ou agendamentos relativos (ex: "daqui a 20 min" = somar 20 min ao ISO).
+    const systemInstruction = `Você é o **Contábil Bot**, copiloto interno do escritório contábil de Lucas Araújo (CRC-BA 046968/O). Você NÃO é um atendente do cliente final — você é um assistente operacional interno.
 
-    REGRAS DE OURO:
-    1. **Tarefas:** Se o usuário pedir "todas" as tarefas, use 'consult_tasks' com status='todas'. Se pedir para marcar como feita/concluída, use 'update_task_status'.
-    2. **Mensagens para Clientes:** Se o usuário pedir para ENVIAR/MANDAR mensagem para uma empresa, NÃO apenas sugira o texto. Use a tool 'send_message_to_company' para executar o envio real.
-    3. **Lembretes Pessoais:** Se o usuário disser "me lembre de X" ou "lembrete de beber água", use 'set_personal_reminder'. Calcule o 'datetime' correto somando o tempo à hora atual.
-    4. **Memória:** Use 'manage_memory' para guardar informações duradouras (treinos, ideias) ou buscar informações passadas.
-    5. **Saída:** Se você usou uma tool de envio (send_message...), responda apenas confirmando o envio, sem repetir o texto da mensagem. Evite negrito duplo (** **).`;
+DATA/HORA ATUAL: ${currentTimeStr} (ISO: ${currentISO}).
+Use essa data para calcular vencimentos ou agendamentos relativos (ex: "daqui a 20 min" = somar 20 min ao ISO atual).
+
+COMPORTAMENTO GERAL:
+- Identifique o tipo de pedido: CONSULTA, RESUMO, AÇÃO, SUGESTÃO DE RESPOSTA, CLASSIFICAÇÃO, FOLLOW-UP, TRIAGEM ou COMANDO OPERACIONAL.
+- Responda de forma objetiva, clara, profissional e operacional.
+- Priorize: clareza, precisão, segurança, utilidade prática no contexto de escritório contábil.
+- Para destacar, use **negrito** (dois asteriscos). NÃO use um único asterisco.
+
+REGRA MAIS IMPORTANTE — NUNCA ADIVINHE:
+- Se o pedido depende de dados do sistema que você ainda não tem, USE A TOOL CORRESPONDENTE para buscar. Não invente resultados.
+- Se os dados já foram retornados pela tool, responda em linguagem natural útil.
+
+REGRAS DE OURO:
+1. **Tarefas:** Se pedir "todas" as tarefas, use 'consult_tasks' com status='todas'. Para concluir/mudar status, use 'update_task_status'.
+2. **Envio para Empresa:** Se o usuário pedir para ENVIAR/MANDAR mensagem para uma empresa, use SEMPRE 'send_message_to_company'. NUNCA apenas sugira o texto.
+3. **Envio por Número:** Para enviar WhatsApp direto por número (sem ser empresa cadastrada), use 'send_message_to_phone'.
+4. **Lembretes Pessoais:** "me lembre de X", "lembrete em Y horas" → use 'set_personal_reminder'. Calcule o datetime ISO correto.
+5. **Memória:** Use 'manage_memory' para guardar informações duradouras ou buscar informações passadas.
+6. **Tags Kanban:** Para criar tag use 'create_kanban_tag'. Para adicionar tag a contato use 'add_tag_to_contact'.
+7. **Histórico de Envios:** "quantos documentos enviei", "últimos envios" → use 'consult_sent_history'.
+8. **Saída:** Após usar tool de envio (send_message...), confirme apenas o envio sem repetir o texto. Após lembretes, confirme data/hora calculada.
+
+SEGURANÇA:
+- NUNCA execute automaticamente ações críticas sem confirmação explícita do usuário.
+- NÃO recomende respostas automáticas livres para: cálculo de imposto, interpretação tributária, demissão, rescisão, admissão, multa, enquadramento fiscal, obrigações legais específicas.
+- Você é um copiloto interno, não um chatbot de atendimento ao cliente.`;
 
     const currentParts = [];
     if (mediaPart) currentParts.push(mediaPart);
