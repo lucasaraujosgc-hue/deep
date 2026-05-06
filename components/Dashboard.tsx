@@ -8,6 +8,31 @@ import { UserSettings, WaKanbanState, WaKanbanColumn, WaKanbanTag, WaKanbanCard 
 import { api } from '../services/api';
 import ReactMarkdown from 'react-markdown';
 
+// Helper: resolve display label for a chatId
+// If chatId starts with 55<digits>@c.us → show formatted phone number
+// Otherwise use the provided name (LID or name)
+const getContactDisplayLabel = (chatId: string, name: string): string => {
+  if (!chatId) return name || 'Desconhecido';
+  const phoneMatch = chatId.match(/^(55\d{10,11})@c\.us$/);
+  if (phoneMatch) {
+    const digits = phoneMatch[1]; // e.g. 5575999999999
+    // Format: +55 (75) 99999-9999
+    const ddi = digits.slice(0, 2);   // 55
+    const ddd = digits.slice(2, 4);   // 75
+    const rest = digits.slice(4);
+    const formatted = rest.length === 9
+      ? `+${ddi} (${ddd}) ${rest.slice(0,5)}-${rest.slice(5)}`
+      : `+${ddi} (${ddd}) ${rest.slice(0,4)}-${rest.slice(4)}`;
+    // If name is the same as raw digits or looks like a LID, prefer formatted phone
+    if (!name || name === digits || name.includes('@') || /^\d+$/.test(name)) {
+      return formatted;
+    }
+    return name; // has a real name, use it
+  }
+  return name || chatId.split('@')[0] || 'Desconhecido';
+};
+
+
 interface Props {
   userSettings: UserSettings;
   onSaveSettings: (s: UserSettings) => void;
@@ -145,7 +170,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       
       return {
           id: chatId || '',
-          name: details.name || chat.name || (typeof chat.id === 'object' ? chat.id.user : chat.id?.split('@')[0]) || 'Desconhecido',
+          name: getContactDisplayLabel(chatId, details.name || chat.name || (typeof chat.id === 'object' ? chat.id.user : chat.id?.split('@')[0])),
           unreadCount: chat.unreadCount,
           lastMessage: details.lastMessage !== undefined ? details.lastMessage : chat.lastMessage,
           lastMessageFromMe: details.lastMessageFromMe !== undefined ? details.lastMessageFromMe : chat.lastMessageFromMe,
@@ -1031,3 +1056,4 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 };
 
 export default Dashboard;
+
