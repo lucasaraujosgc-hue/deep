@@ -479,6 +479,41 @@ const assistantTools = [
             },
             required: ["action", "topic"]
         }
+    },
+    {
+        name: "search_whatsapp_contact",
+        description: "Busca um contato/conversa do WhatsApp por nome ou número. Use quando o usuário mencionar um nome de pessoa (não empresa cadastrada) ou número de telefone para enviar mensagem. Retorna o chatId correto para uso em send_message_to_contact.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                query: { type: Type.STRING, description: "Nome parcial ou número do contato a buscar." }
+            },
+            required: ["query"]
+        }
+    },
+    {
+        name: "send_message_to_contact",
+        description: "Envia mensagem WhatsApp para um contato da lista de conversas (não necessariamente empresa cadastrada). Use o chatId retornado por search_whatsapp_contact.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                chat_id: { type: Type.STRING, description: "chatId do contato (ex: 5575999999999@c.us ou LID@lid). Obtido via search_whatsapp_contact." },
+                message: { type: Type.STRING, description: "Texto da mensagem." }
+            },
+            required: ["chat_id", "message"]
+        }
+    },
+    {
+        name: "search_whatsapp_messages",
+        description: "Busca e resume mensagens do WhatsApp de um contato ou de um período. Use para: 'resuma as mensagens de ontem', 'o que fulano me enviou hoje?', 'mensagens recentes de [contato]'.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                contact_query: { type: Type.STRING, description: "Nome ou número do contato (opcional, deixe vazio para todos)." },
+                period: { type: Type.STRING, enum: ["hoje", "ontem", "ultimas24h", "semana"], description: "Período das mensagens." },
+                limit: { type: Type.NUMBER, description: "Número máximo de mensagens a retornar. Padrão: 20." }
+            }
+        }
     }
 ];
 
@@ -715,6 +750,99 @@ const executeTool = async (name, args, db, username) => {
         }
     }
 
+    // Buscar contato do WhatsApp (agenda + lista de conversas)
+    if (name === "search_whatsapp_contact") {
+        const query = (args.query || "").toLowerCase().trim();
+        const waWrapper = getWaClientWrapper(username);
+        if (!waWrapper || waWrapper.status !== "connected") {
+            return "WhatsApp não conectado. Não é possível buscar contatos.";
+        }
+        try {
+            const chats = await waWrapper.client.getChats();
+            const results = [];
+            for (const chat of chats) {
+                if (chat.isGroup) continue;
+                const chatId = chat.id._serialized || "";
+                const chatName = (chat.name || "").toLowerCase();
+                const phone = chatId.replace("@c.us", "").replace("@lid", "");
+                if (chatName.includes(query) || phone.includes(query.replace(/\D/g, ""))) {
+                    const isPhone = /^55\d+@c\.us$/.test(chatId);
+                    results.push({ chatId, name: chat.name || chatId, displayId: isPhone ? "+" + phone : chat.name || chatId });
+                }
+                if (results.length >= 5) break;
+            }
+            if (results.length === 0) {
+                const contacts = await waWrapper.client.getContacts();
+                for (const c of contacts) {
+                    if (!c.id || c.id.server === "g.us") continue;
+                    const cname = (c.name || c.pushname || "").toLowerCase();
+                    const cphone = (c.number || "").replace(/\D/g, "");
+                    if (cname.includes(query) || cphone.includes(query.replace(/\D/g, ""))) {
+                        const cId = c.id._serialized;
+                        const isPhone = /^55\d+@c\.us$/.test(cId);
+                        results.push({ chatId: cId, name: c.name || c.pushname || cId, displayId: isPhone ? "+" + c.number : cId });
+                        if (results.length >= 5) break;
+                    }
+                }
+            }
+            if (results.length === 0) return ;
+            return "Contatos encontrados:
+" + results.map((r, i) => ).join("
+") + "
+
+Use o chatId correto para enviar mensagem.";
+        } catch (e) {
+            log("[AI Tool] search_whatsapp_contact error", e);
+            return "Erro ao buscar contatos: " + e.message;
+        }
+    }
+
+    if (name === "send_message_to_contact") {
+        const waWrapper = getWaClientWrapper(username);
+        if (!waWrapper || waWrapper.status !== "connected") return "WhatsApp não conectado.";
+        try {
+            await safeSendMessage(waWrapper.client, args.chat_id, args.message);
+            return ;
+        } catch (e) {
+            return ;
+        }
+    }
+
+    if (name === "search_whatsapp_messages") {
+        const now = new Date();
+        const brNow = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) - 3600000 * 3);
+        const period = args.period || "hoje";
+        const limit = args.limit || 20;
+        const contactQ = (args.contact_query || "").trim();
+        let fromTs = 0, toTs = Math.floor(brNow.getTime() / 1000);
+        if (period === "hoje") {
+            const s = new Date(brNow); s.setHours(0,0,0,0); fromTs = Math.floor(s.getTime() / 1000);
+        } else if (period === "ontem") {
+            const s = new Date(brNow); s.setDate(s.getDate()-1); s.setHours(0,0,0,0); fromTs = Math.floor(s.getTime()/1000);
+            const e2 = new Date(s); e2.setHours(23,59,59,999); toTs = Math.floor(e2.getTime()/1000);
+        } else if (period === "ultimas24h") {
+            fromTs = Math.floor((brNow.getTime() - 86400000) / 1000);
+        } else if (period === "semana") {
+            fromTs = Math.floor((brNow.getTime() - 7 * 86400000) / 1000);
+        }
+        return new Promise(resolve => {
+            let sql = "SELECT m.chatId, m.body, m.timestamp, m.fromMe FROM whatsapp_messages m WHERE m.timestamp >= ? AND m.timestamp <= ? AND m.body != ''";
+            const params = [fromTs, toTs];
+            if (contactQ) { sql += " AND (m.chatId LIKE ? OR m.sender LIKE ?)"; params.push("%" + contactQ.replace(/\D/g,"") + "%", "%" + contactQ + "%"); }
+            sql += " ORDER BY m.timestamp ASC LIMIT ?"; params.push(limit);
+            db.all(sql, params, (err, rows) => {
+                if (err || !rows || rows.length === 0) { resolve("Nenhuma mensagem encontrada no período solicitado."); return; }
+                const summary = rows.map(r => {
+                    const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+                    const who = r.fromMe ? "Você" : r.chatId.replace("@c.us","").replace("@lid","");
+                    return ;
+                }).join("
+");
+                resolve();
+            });
+        });
+    }
+
     return "Ferramenta desconhecida.";
 };
 
@@ -770,13 +898,15 @@ REGRA MAIS IMPORTANTE — NUNCA ADIVINHE:
 
 REGRAS DE OURO:
 1. **Tarefas:** Se pedir "todas" as tarefas, use 'consult_tasks' com status='todas'. Para concluir/mudar status, use 'update_task_status'.
-2. **Envio para Empresa:** Se o usuário pedir para ENVIAR/MANDAR mensagem para uma empresa, use SEMPRE 'send_message_to_company'. NUNCA apenas sugira o texto.
-3. **Envio por Número:** Para enviar WhatsApp direto por número (sem ser empresa cadastrada), use 'send_message_to_phone'.
-4. **Lembretes Pessoais:** "me lembre de X", "lembrete em Y horas" → use 'set_personal_reminder'. Calcule o datetime ISO correto.
-5. **Memória:** Use 'manage_memory' para guardar informações duradouras ou buscar informações passadas.
-6. **Tags Kanban:** Para criar tag use 'create_kanban_tag'. Para adicionar tag a contato use 'add_tag_to_contact'.
-7. **Histórico de Envios:** "quantos documentos enviei", "últimos envios" → use 'consult_sent_history'.
-8. **Saída:** Após usar tool de envio (send_message...), confirme apenas o envio sem repetir o texto. Após lembretes, confirme data/hora calculada.
+2. **Envio para Empresa Cadastrada:** Se o usuário pedir para enviar mensagem para uma empresa cadastrada no sistema, use SEMPRE 'send_message_to_company'. NUNCA apenas sugira o texto.
+3. **Envio para Contato da Conversa (pessoa/número não empresa):** Se o usuário citar um nome de pessoa ou número que pode ser da lista de conversas do WhatsApp, use PRIMEIRO 'search_whatsapp_contact' para encontrar o chatId correto, depois 'send_message_to_contact'. Nunca adivinhe o número.
+4. **Envio por Número Direto:** Se o usuário fornecer um número explícito, use 'send_message_to_phone' diretamente.
+5. **Lembretes Pessoais:** "me lembre de X", "lembrete em Y horas" → use 'set_personal_reminder'. Calcule o datetime ISO correto com base na hora atual do system prompt. O sistema envia automaticamente para o número configurado.
+6. **Resumo de Mensagens WhatsApp:** "resuma mensagens de ontem", "o que fulano me enviou hoje?" → use 'search_whatsapp_messages' com o period e contact_query corretos.
+7. **Memória:** Use 'manage_memory' para guardar informações duradouras ou buscar informações passadas.
+8. **Tags Kanban:** Para criar tag use 'create_kanban_tag'. Para adicionar tag a contato use 'add_tag_to_contact'.
+9. **Histórico de Envios:** "quantos documentos enviei", "últimos envios" → use 'consult_sent_history'.
+10. **Saída:** Após usar tool de envio, confirme apenas o envio sem repetir o texto. Após lembretes, confirme data/hora calculada.
 
 SEGURANÇA:
 - NUNCA execute automaticamente ações críticas sem confirmação explícita do usuário.
@@ -946,29 +1076,36 @@ const getWaClientWrapper = (username) => {
                     db.get("SELECT settings FROM user_settings WHERE id = 1", (e, r) => resolve(r ? JSON.parse(r.settings) : null));
                 });
 
-                if (!settings || !settings.dailySummaryNumber) {
-                    return;
-                }
-
-                const authorizedNumber = settings.dailySummaryNumber.replace(/\D/g, '');
-
-                // Suporte a @c.us (número normal) e @lid (LID do WhatsApp)
-                // LID fixo do operador autorizado
-                const AUTHORIZED_LID = '140368205074641@lid';
+                // Números/LIDs autorizados para acionar a IA
+                const FALLBACK_AUTHORIZED_NUMBER = '557591167094';
+                const FALLBACK_AUTHORIZED_LID = '105403295727623@lid';
+                const LEGACY_LID = '140368205074641@lid';
 
                 const isLid = msg.from.endsWith('@lid');
                 let isAuthorized = false;
 
                 if (isLid) {
-                    // Verifica se o LID bate com o LID autorizado
-                    isAuthorized = (msg.from === AUTHORIZED_LID);
+                    // Aceita o LID do fallback ou o LID legado
+                    isAuthorized = (msg.from === FALLBACK_AUTHORIZED_LID || msg.from === LEGACY_LID);
+                    // Também aceita LID configurado nas settings
+                    if (!isAuthorized && settings?.authorizedLid) {
+                        isAuthorized = (msg.from === settings.authorizedLid);
+                    }
                 } else {
-                    // Verifica número normal via dailySummaryNumber
                     const senderNumber = msg.from.replace('@c.us', '').replace(/\D/g, '');
-                    isAuthorized = senderNumber.endsWith(authorizedNumber);
+                    // Aceita o número do fallback
+                    if (senderNumber === FALLBACK_AUTHORIZED_NUMBER.replace(/\D/g, '')) {
+                        isAuthorized = true;
+                    }
+                    // Aceita número configurado nas settings
+                    if (!isAuthorized && settings?.dailySummaryNumber) {
+                        const authorizedNumber = settings.dailySummaryNumber.replace(/\D/g, '');
+                        isAuthorized = senderNumber.endsWith(authorizedNumber);
+                    }
                 }
 
                 if (!isAuthorized) {
+                    log(`[AI Trigger] Acesso negado para: ${msg.from}`);
                     return;
                 }
 
@@ -1186,7 +1323,12 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
     try {
         const username = req.user;
         const msg = req.body.message;
-        const reply = await processAI(username, msg);
+        const historyContext = req.body.historyContext || '';
+        // Prepend local history context to the message for better AI continuity
+        const enrichedMsg = historyContext
+            ? `[Contexto do histórico local de conversas com a IA:\n${historyContext}\n---\nMensagem atual:]\n${msg}`
+            : msg;
+        const reply = await processAI(username, enrichedMsg);
         res.json({ reply });
     } catch (e) {
         log("[AI Route Error]", e);
@@ -2084,13 +2226,30 @@ setInterval(() => {
             for (const msg of rows) {
                 try {
                     if (msg.targetType === 'personal') {
-                        if (clientReady && settings?.dailySummaryNumber) {
-                            let number = settings.dailySummaryNumber.replace(/\D/g, '');
-                            if (!number.startsWith('55')) number = '55' + number;
-                            const chatId = `${number}@c.us`;
-                            
-                            await safeSendMessage(waWrapper.client, chatId, `⏰ *Lembrete:* ${msg.message}`);
-                            log(`[CRON] Lembrete pessoal enviado para ${user}`);
+                        if (clientReady) {
+                            // Use configured number, or fallback to 557591167094
+                            const FALLBACK_REMINDER_NUMBER = '557591167094';
+                            const FALLBACK_REMINDER_LID = '105403295727623@lid';
+                            let chatId;
+                            if (settings?.dailySummaryNumber) {
+                                let number = settings.dailySummaryNumber.replace(/\D/g, '');
+                                if (!number.startsWith('55')) number = '55' + number;
+                                chatId = `${number}@c.us`;
+                            } else {
+                                chatId = FALLBACK_REMINDER_LID;
+                            }
+                            try {
+                                await safeSendMessage(waWrapper.client, chatId, `⏰ *Lembrete:* ${msg.message}`);
+                                log(`[CRON] Lembrete pessoal enviado para ${chatId}`);
+                            } catch (lidErr) {
+                                // If LID fails, try phone number
+                                log(`[CRON] Falha com LID, tentando número: ${lidErr.message}`);
+                                const fallbackPhone = `${FALLBACK_REMINDER_NUMBER}@c.us`;
+                                await safeSendMessage(waWrapper.client, fallbackPhone, `⏰ *Lembrete:* ${msg.message}`);
+                                log(`[CRON] Lembrete enviado via telefone para ${fallbackPhone}`);
+                            }
+                        } else {
+                            log(`[CRON] WhatsApp não conectado, lembrete pendente: ${msg.message}`);
                         }
                     } 
                     else {
