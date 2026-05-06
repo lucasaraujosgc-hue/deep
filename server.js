@@ -785,12 +785,8 @@ const executeTool = async (name, args, db, username) => {
                     }
                 }
             }
-            if (results.length === 0) return ;
-            return "Contatos encontrados:
-" + results.map((r, i) => ).join("
-") + "
-
-Use o chatId correto para enviar mensagem.";
+            if (results.length === 0) return `Nenhum contato encontrado para "${args.query}".`;
+            return "Contatos encontrados:\n" + results.map((r, i) => `${i+1}. ${r.name} (${r.displayId}) — chatId: ${r.chatId}`).join("\n") + "\n\nUse o chatId correto para enviar mensagem.";
         } catch (e) {
             log("[AI Tool] search_whatsapp_contact error", e);
             return "Erro ao buscar contatos: " + e.message;
@@ -802,9 +798,9 @@ Use o chatId correto para enviar mensagem.";
         if (!waWrapper || waWrapper.status !== "connected") return "WhatsApp não conectado.";
         try {
             await safeSendMessage(waWrapper.client, args.chat_id, args.message);
-            return ;
+            return `✅ Mensagem enviada para ${args.chat_id}.`;
         } catch (e) {
-            return ;
+            return `❌ Erro ao enviar: ${e.message}`;
         }
     }
 
@@ -835,10 +831,9 @@ Use o chatId correto para enviar mensagem.";
                 const summary = rows.map(r => {
                     const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
                     const who = r.fromMe ? "Você" : r.chatId.replace("@c.us","").replace("@lid","");
-                    return ;
-                }).join("
-");
-                resolve();
+                    return `[${t}] ${who}: ${r.body.slice(0,200)}`;
+                }).join("\n");
+                resolve(`Mensagens ${period} (${rows.length}):\n\n${summary}`);
             });
         });
     }
@@ -2395,3 +2390,4 @@ setInterval(() => {
 }, 60000); 
 
 app.listen(port, () => log(`Server running at http://localhost:${port}`));
+
