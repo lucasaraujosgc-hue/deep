@@ -1548,29 +1548,54 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         const chat = await wrapper.client.getChatById(chatId);
 
         let allMessages = [];
-        let totalFetched = 0;
+        let seenIds = new Set();
         let reachedLimit = false;
-        let batchLimit = 100;
-        let fetchedBatch = await chat.fetchMessages({ limit: batchLimit });
+
+        // Busca inicial
+        let fetchedBatch = await chat.fetchMessages({ limit: 100 });
+        let lastOldestId = null;
 
         while (fetchedBatch && fetchedBatch.length > 0 && !reachedLimit) {
-            totalFetched += fetchedBatch.length;
+            // Detecta loop infinito: msg mais antiga igual ao batch anterior
+            const currentOldest = fetchedBatch.reduce((o, m) => m.timestamp < o.timestamp ? m : o, fetchedBatch[0]);
+            if (lastOldestId && currentOldest.id._serialized === lastOldestId) {
+                log('[History] Loop detectado (API sem suporte a cursor before). Parando.');
+                break;
+            }
+            lastOldestId = currentOldest.id._serialized;
 
-            const inPeriod = fetchedBatch.filter(m => m.timestamp >= FORTY_FIVE_DAYS_AGO);
+            // Filtra duplicatas e msgs fora do período
+            const inPeriod = fetchedBatch.filter(m => {
+                if (seenIds.has(m.id._serialized)) return false;
+                seenIds.add(m.id._serialized);
+                return m.timestamp >= FORTY_FIVE_DAYS_AGO;
+            });
+
             allMessages = [...allMessages, ...inPeriod];
+            log(`[History] Batch: ${fetchedBatch.length} msgs | No período: ${inPeriod.length} | Acumulado: ${allMessages.length}`);
 
-            log(`[History] Batch: ${fetchedBatch.length} msgs | No período: ${inPeriod.length} | Total acumulado: ${allMessages.length}`);
-
+            // Chegou antes do período de 45 dias
             if (fetchedBatch.some(m => m.timestamp < FORTY_FIVE_DAYS_AGO)) {
                 reachedLimit = true;
                 break;
             }
 
-            if (fetchedBatch.length < batchLimit) break;
-            if (totalFetched >= 3000) break;
+            // Menos mensagens que o limite: sem mais histórico
+            if (fetchedBatch.length < 100) break;
 
-            batchLimit = Math.min(batchLimit + 100, 500);
-            fetchedBatch = await chat.fetchMessages({ limit: batchLimit });
+            // Limite de segurança
+            if (allMessages.length >= 3000) break;
+
+            // Próximo batch usando cursor before na msg mais antiga
+            try {
+                fetchedBatch = await chat.fetchMessages({
+                    limit: 100,
+                    before: currentOldest.id._serialized
+                });
+            } catch (cursorErr) {
+                log('[History] Cursor before não suportado, parando paginação.', cursorErr);
+                break;
+            }
         }
 
         const toSave = allMessages.map(m => ({
