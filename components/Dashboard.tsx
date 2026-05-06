@@ -480,17 +480,10 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   }
 
   return (
-    <div className="h-full flex flex-col space-y-4" style={{ zoom: 1.0 }}>
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100 gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <MessageCircle className="w-6 h-6 text-green-500" /> Kanban WhatsApp
-          </h2>
-          <p className="text-sm text-gray-500">Gerencie suas conversas eficientemente</p>
-        </div>
-        <div className="flex items-center gap-3 w-full md:w-auto">
-           <div className="flex bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0 shadow-sm grow md:grow-0">
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 73px)', overflow: 'hidden' }}>
+      {/* Toolbar compacta */}
+      <div className="flex items-center gap-2 bg-white px-3 py-2 border-b border-gray-100 shrink-0 flex-wrap">
+           <div className="flex bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
                <div className="pl-3 flex items-center justify-center text-gray-400">
                   <Search className="w-4 h-4" />
                </div>
@@ -499,16 +492,16 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                   placeholder="Pesquisar (Nome, n°, tag)..."
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
-                  className="px-3 py-2 bg-transparent outline-none flex-1 text-sm min-w-[200px]"
+                  className="px-3 py-1.5 bg-transparent outline-none text-sm min-w-[180px]"
                />
            </div>
-           <div className="flex bg-gray-50 border border-gray-200 rounded-lg overflow-hidden shrink-0">
+           <div className="flex bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
                <input 
                   type="text"
-                  placeholder="Carregar Número (Ex: 55119999999)"
+                  placeholder="Carregar Número (Ex: 55119)"
                   value={contactNumber}
                   onChange={e => setContactNumber(e.target.value)}
-                  className="px-3 py-2 bg-transparent outline-none flex-1 text-sm min-w-[200px]"
+                  className="px-3 py-1.5 bg-transparent outline-none text-sm min-w-[180px]"
                />
                <button onClick={handleLoadContact} className="px-3 text-gray-600 hover:bg-gray-200 transition-colors">
                    <Phone className="w-4 h-4" />
@@ -516,16 +509,15 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
            </div>
            <button 
              onClick={() => setIsConfigModalOpen(true)}
-             className="p-2 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
+             className="p-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
              title="Configurar Colunas e Tags"
            >
               <Settings className="w-5 h-5" />
            </button>
-        </div>
       </div>
 
       {/* Kanban Board */}
-      <div className="flex-1 overflow-x-auto flex gap-3 pb-4">
+      <div className="flex-1 overflow-x-auto flex gap-3 p-3">
           {kanbanState.columns.map(col => {
               const colCards = mergedCards.filter(c => c.colId === col.id);
               
