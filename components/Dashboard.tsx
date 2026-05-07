@@ -42,6 +42,9 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [loading, setLoading] = useState(true);
   const [waChats, setWaChats] = useState<any[]>([]);
   const [contactNumber, setContactNumber] = useState('');
+  const [aiEnabled, setAiEnabled] = useState<boolean>(
+    userSettings.aiEnabled !== false
+  );
   
   // Modals
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
@@ -62,6 +65,18 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
+
+  const handleToggleAI = async () => {
+    const newValue = !aiEnabled;
+    setAiEnabled(newValue);
+    const newSettings = { ...userSettings, aiEnabled: newValue };
+    try {
+      await api.saveSettings(newSettings);
+      onSaveSettings(newSettings);
+    } catch (e) {
+      setAiEnabled(!newValue); // reverter em caso de erro
+    }
+  };
 
   const loadWaChats = async () => {
     try {
@@ -538,6 +553,21 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
              title="Configurar Colunas e Tags"
            >
               <Settings className="w-5 h-5" />
+           </button>
+           <button
+             onClick={handleToggleAI}
+             title={aiEnabled ? 'IA Ativada — clique para desativar' : 'IA Desativada — clique para ativar'}
+             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+               aiEnabled
+                 ? 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
+                 : 'bg-gray-50 border-gray-300 text-gray-400 hover:bg-gray-100'
+             }`}
+           >
+             <Bot className="w-4 h-4" />
+             <span className="hidden sm:inline">IA {aiEnabled ? 'On' : 'Off'}</span>
+             <span
+               className={`w-2 h-2 rounded-full ${aiEnabled ? 'bg-green-500' : 'bg-gray-400'}`}
+             />
            </button>
       </div>
 
