@@ -914,7 +914,7 @@ SEGURANÇA:
 
     try {
         const chat = ai.chats.create({ 
-            model: "gemini-3-flash-preview", 
+            model: "gemini-2.0-flash", 
             config: {
                 systemInstruction: systemInstruction,
                 tools: [{ functionDeclarations: assistantTools }]
@@ -944,8 +944,9 @@ SEGURANÇA:
 
     } catch (e) {
         log("[AI Error]", e);
-        if (e.message?.includes('404')) return "Erro: O modelo gemini-3-flash-preview ainda não está disponível na sua região ou chave. Tente reverter para gemini-2.0-flash.";
-        return "Desculpe, tive um problema momentâneo.";
+        if (e.message?.includes('404')) return "Erro: Modelo de IA não encontrado. Verifique as configurações do servidor.";
+        if (e.message?.includes('429')) return "Muitas requisições à IA no momento. Aguarde alguns segundos e tente novamente.";
+        return `Desculpe, ocorreu um erro interno (${e.message?.slice(0,80) || 'desconhecido'}). Tente novamente.`;
     }
 };
 
@@ -2390,4 +2391,3 @@ setInterval(() => {
 }, 60000); 
 
 app.listen(port, () => log(`Server running at http://localhost:${port}`));
-
