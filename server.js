@@ -178,6 +178,23 @@ const saveMessagesToDb = (db, messages) => {
     });
 };
 
+// ============================================================
+// CORREÇÃO 2 — HELPER: upsertContactCache
+// ============================================================
+const upsertContactCache = (db, contactId, contactName, phoneNumber = null) => {
+    if (!db || !contactId || !contactName) return;
+    db.run(
+        `INSERT INTO whatsapp_contacts (contact_id, name, phone_number, last_seen)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(contact_id) DO UPDATE SET
+         name = COALESCE(?, name),
+         phone_number = COALESCE(?, phone_number),
+         last_seen = CURRENT_TIMESTAMP`,
+        [contactId, contactName, phoneNumber, contactName, phoneNumber],
+        (err) => { if (err) log(`[DB] Erro upsert contato ${contactId}: ${err.message}`); }
+    );
+};
+
 // --- MULTI-TENANCY: Database Management ---
 const dbInstances = {};
 
@@ -200,10 +217,25 @@ const getDb = (username) => {
         db.run(`CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, content TEXT, timestamp TEXT)`);
         db.run(`CREATE TABLE IF NOT EXISTS file_gallery (id INTEGER PRIMARY KEY AUTOINCREMENT, serverFilename TEXT, originalName TEXT, mimeType TEXT, size INTEGER, contact TEXT, channel TEXT, direction TEXT, timestamp TEXT)`);
         db.run(`CREATE TABLE IF NOT EXISTS personal_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, content TEXT, created_at TEXT, updated_at TEXT)`);
-        db.run(`CREATE TABLE IF NOT EXISTS whatsapp_messages (id TEXT PRIMARY KEY, chatId TEXT NOT NULL, sender TEXT, timestamp INTEGER, body TEXT, fromMe INTEGER, hasMedia INTEGER, type TEXT, transcription TEXT)`);
+        
+        // ============================================================
+        // CORREÇÃO 1 — Adicionar coluna contactName e tabela whatsapp_contacts
+        // ============================================================
+        db.run(`CREATE TABLE IF NOT EXISTS whatsapp_messages (id TEXT PRIMARY KEY, chatId TEXT NOT NULL, sender TEXT, timestamp INTEGER, body TEXT, fromMe INTEGER, hasMedia INTEGER, type TEXT, transcription TEXT, contactName TEXT)`);
         db.run(`CREATE TABLE IF NOT EXISTS whatsapp_sync (chatId TEXT PRIMARY KEY, lastSyncTimestamp INTEGER)`);
+        db.run(`CREATE TABLE IF NOT EXISTS whatsapp_contacts (contact_id TEXT PRIMARY KEY, name TEXT, phone_number TEXT, last_seen TIMESTAMP)`);
+        
         db.run(`CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chatId ON whatsapp_messages(chatId)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_timestamp ON whatsapp_messages(timestamp)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_whatsapp_contacts_name ON whatsapp_contacts(name)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_whatsapp_contacts_phone ON whatsapp_contacts(phone_number)`);
+
+        // Migração para adicionar contactName se não existir
+        db.all("PRAGMA table_info(whatsapp_messages)", [], (err, rows) => {
+            if (rows && !rows.some(col => col.name === 'contactName')) {
+                db.run("ALTER TABLE whatsapp_messages ADD COLUMN contactName TEXT", () => {});
+            }
+        });
 
         db.all("PRAGMA table_info(companies)", [], (err, rows) => {
             if (rows && !rows.some(col => col.name === 'categories')) {
@@ -332,6 +364,9 @@ const saveToImapSentFolder = async (mailOptions) => {
 
 // --- AI LOGIC: Tools & Handler ---
 
+// ============================================================
+// CORREÇÃO 7 — Descriptions aprimoradas das tools
+// ============================================================
 const assistantTools = [
     {
         name: "consult_tasks",
@@ -447,7 +482,7 @@ const assistantTools = [
     },
     {
         name: "add_tag_to_contact",
-        description: "Adiciona uma tag existente a um contato/chat no Kanban.",
+        description: "Adiciona uma tag existente a um contato/chat no Kanban. IMPORTANTE: O contato já deve existir no banco de contatos. Use search_whatsapp_contact primeiro para obter o contact_id correto, se necessário.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -482,7 +517,7 @@ const assistantTools = [
     },
     {
         name: "search_whatsapp_contact",
-        description: "Busca um contato/conversa do WhatsApp por nome ou número. Use quando o usuário mencionar um nome de pessoa (não empresa cadastrada) ou número de telefone para enviar mensagem. Retorna o chatId correto para uso em send_message_to_contact.",
+        description: "Busca um contato/conversa do WhatsApp por nome ou número. Retorna o chat_id correto (seja @c.us ou @lid) e informa o tipo. Use o chat_id retornado para enviar mensagem.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -493,7 +528,7 @@ const assistantTools = [
     },
     {
         name: "send_message_to_contact",
-        description: "Envia mensagem WhatsApp para um contato da lista de conversas (não necessariamente empresa cadastrada). Use o chatId retornado por search_whatsapp_contact.",
+        description: "Envia mensagem WhatsApp para um contato da lista de conversas (não necessariamente empresa cadastrada). Use o chat_id retornado por search_whatsapp_contact. NUNCA adivinhe ou construa o chat_id manualmente.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -505,7 +540,7 @@ const assistantTools = [
     },
     {
         name: "search_whatsapp_messages",
-        description: "Busca e resume mensagens do WhatsApp de um contato ou de um período. Use para: 'resuma as mensagens de ontem', 'o que fulano me enviou hoje?', 'mensagens recentes de [contato]'.",
+        description: "Busca e resume mensagens do WhatsApp de um contato ou de um período. Use contact_query com nome ou número — a busca funciona no cache de contatos e não exige que o contato esteja online. Ex: 'resuma as mensagens de ontem', 'o que João me enviou hoje?'",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -701,18 +736,25 @@ const executeTool = async (name, args, db, username) => {
         });
     }
 
-    // Adicionar tag a contato
+    // ============================================================
+    // CORREÇÃO 6 — add_tag_to_contact usando whatsapp_contacts
+    // ============================================================
     if (name === "add_tag_to_contact") {
         return new Promise((resolve) => {
             let phone = (args.phone || '').replace(/\D/g, '');
             if (!phone.startsWith('55')) phone = '55' + phone;
-            const chatId = `${phone}@c.us`;
+            const possibleChatIds = [`${phone}@c.us`];
 
-            db.get("SELECT id FROM chats WHERE phone = ? OR id = ?", [phone, chatId], (err, chat) => {
-                if (!chat) { resolve(`❌ Contato com número ${args.phone} não encontrado no Kanban.`); return; }
+            db.get("SELECT contact_id FROM whatsapp_contacts WHERE phone_number = ? OR contact_id IN (?, ?)",
+                [phone, possibleChatIds[0], possibleChatIds[0]], (err, contactRow) => {
+                if (err || !contactRow) {
+                    resolve(`❌ Contato com número ${args.phone} não encontrado no cache de contatos. Use search_whatsapp_contact primeiro.`);
+                    return;
+                }
+                const contactId = contactRow.contact_id;
                 db.get("SELECT id FROM tags WHERE name LIKE ?", [`%${args.tag_name}%`], (err2, tag) => {
                     if (!tag) { resolve(`❌ Tag "${args.tag_name}" não encontrada. Use 'criar tag' primeiro.`); return; }
-                    db.run("INSERT OR IGNORE INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [chat.id, tag.id], function(err3) {
+                    db.run("INSERT OR IGNORE INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [contactId, tag.id], function(err3) {
                         if (err3) resolve("Erro ao adicionar tag: " + err3.message);
                         else resolve(`✅ Tag "${args.tag_name}" adicionada ao contato ${args.phone}.`);
                     });
@@ -750,43 +792,93 @@ const executeTool = async (name, args, db, username) => {
         }
     }
 
-    // Buscar contato do WhatsApp (agenda + lista de conversas)
+    // ============================================================
+    // CORREÇÃO 4 — search_whatsapp_contact reescrita
+    // ============================================================
     if (name === "search_whatsapp_contact") {
         const query = (args.query || "").toLowerCase().trim();
+        if (!query) return "Nenhuma consulta fornecida.";
+
         const waWrapper = getWaClientWrapper(username);
         if (!waWrapper || waWrapper.status !== "connected") {
             return "WhatsApp não conectado. Não é possível buscar contatos.";
         }
+
         try {
-            const chats = await waWrapper.client.getChats();
             const results = [];
-            for (const chat of chats) {
-                if (chat.isGroup) continue;
-                const chatId = chat.id._serialized || "";
-                const chatName = (chat.name || "").toLowerCase();
-                const phone = chatId.replace("@c.us", "").replace("@lid", "");
-                if (chatName.includes(query) || phone.includes(query.replace(/\D/g, ""))) {
-                    const isPhone = /^55\d+@c\.us$/.test(chatId);
-                    results.push({ chatId, name: chat.name || chatId, displayId: isPhone ? "+" + phone : chat.name || chatId });
-                }
-                if (results.length >= 5) break;
+
+            // 1) Buscar no cache local primeiro
+            const contactsCache = await new Promise(resolve => {
+                db.all("SELECT contact_id, name, phone_number FROM whatsapp_contacts WHERE name LIKE ? OR phone_number LIKE ?",
+                [`%${query}%`, `%${query.replace(/\D/g, '')}%`], (err, rows) => resolve(rows || []));
+            });
+            for (const c of contactsCache) {
+                results.push({
+                    chat_id: c.contact_id,
+                    name: c.name,
+                    phone_number: c.phone_number,
+                    chat_id_type: c.contact_id.includes('@lid') ? 'lid' : 'c.us',
+                    source: 'cache'
+                });
             }
-            if (results.length === 0) {
-                const contacts = await waWrapper.client.getContacts();
-                for (const c of contacts) {
-                    if (!c.id || c.id.server === "g.us") continue;
-                    const cname = (c.name || c.pushname || "").toLowerCase();
-                    const cphone = (c.number || "").replace(/\D/g, "");
-                    if (cname.includes(query) || cphone.includes(query.replace(/\D/g, ""))) {
-                        const cId = c.id._serialized;
-                        const isPhone = /^55\d+@c\.us$/.test(cId);
-                        results.push({ chatId: cId, name: c.name || c.pushname || cId, displayId: isPhone ? "+" + c.number : cId });
-                        if (results.length >= 5) break;
+
+            // 2) Buscar em chats ativos se necessário (até completar 5)
+            if (results.length < 5) {
+                const chats = await waWrapper.client.getChats();
+                for (const chat of chats) {
+                    if (chat.isGroup) continue;
+                    const chatId = chat.id._serialized || "";
+                    const chatName = (chat.name || "").toLowerCase();
+                    const phone = chatId.replace("@c.us", "").replace("@lid", "");
+                    if (!chatName.includes(query) && !phone.includes(query.replace(/\D/g, ""))) continue;
+                    if (results.some(r => r.chat_id === chatId)) continue;
+
+                    const isLid = chatId.includes('@lid');
+                    if (!isLid) {
+                        try {
+                            const numberPart = phone;
+                            if (numberPart) {
+                                const contactId = await waWrapper.client.getNumberId(numberPart);
+                                if (contactId && contactId._serialized !== chatId) {
+                                    if (!results.some(r => r.chat_id === contactId._serialized)) {
+                                        results.push({
+                                            chat_id: contactId._serialized,
+                                            name: chat.name,
+                                            phone_number: numberPart,
+                                            chat_id_type: contactId._serialized.includes('@lid') ? 'lid' : 'c.us',
+                                            source: 'chat_resolved'
+                                        });
+                                    }
+                                    continue;
+                                }
+                            }
+                        } catch (e) {}
                     }
+                    results.push({
+                        chat_id: chatId,
+                        name: chat.name,
+                        phone_number: isLid ? null : phone,
+                        chat_id_type: isLid ? 'lid' : 'c.us',
+                        source: 'chat'
+                    });
+                    if (results.length >= 5) break;
                 }
             }
+
             if (results.length === 0) return `Nenhum contato encontrado para "${args.query}".`;
-            return "Contatos encontrados:\n" + results.map((r, i) => `${i+1}. ${r.name} (${r.displayId}) — chatId: ${r.chatId}`).join("\n") + "\n\nUse o chatId correto para enviar mensagem.";
+
+            let reply = `🔍 *Contatos encontrados:*\n\n`;
+            for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                reply += `${i+1}. *${r.name}*\n`;
+                reply += `   ID: \`${r.chat_id}\`\n`;
+                reply += `   Tipo: ${r.chat_id_type === 'lid' ? '🔒 LID (conversa criptografada)' : '📞 Número de telefone'}\n`;
+                if (r.phone_number) reply += `   Telefone: +${r.phone_number}\n`;
+                reply += `\n`;
+            }
+            reply += `👉 Use o campo \`chat_id\` exatamente como mostrado para enviar mensagem com \`send_message_to_contact\`.`;
+            return reply;
+
         } catch (e) {
             log("[AI Tool] search_whatsapp_contact error", e);
             return "Erro ao buscar contatos: " + e.message;
@@ -804,12 +896,16 @@ const executeTool = async (name, args, db, username) => {
         }
     }
 
+    // ============================================================
+    // CORREÇÃO 5 — search_whatsapp_messages reescrita
+    // ============================================================
     if (name === "search_whatsapp_messages") {
         const now = new Date();
-        const brNow = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) - 3600000 * 3);
+        const brNow = new Date(now.getTime() - 3 * 3600 * 1000);
         const period = args.period || "hoje";
-        const limit = args.limit || 20;
+        const limit = Math.min(args.limit || 20, 50);
         const contactQ = (args.contact_query || "").trim();
+
         let fromTs = 0, toTs = Math.floor(brNow.getTime() / 1000);
         if (period === "hoje") {
             const s = new Date(brNow); s.setHours(0,0,0,0); fromTs = Math.floor(s.getTime() / 1000);
@@ -821,20 +917,64 @@ const executeTool = async (name, args, db, username) => {
         } else if (period === "semana") {
             fromTs = Math.floor((brNow.getTime() - 7 * 86400000) / 1000);
         }
+
         return new Promise(resolve => {
-            let sql = "SELECT m.chatId, m.body, m.timestamp, m.fromMe FROM whatsapp_messages m WHERE m.timestamp >= ? AND m.timestamp <= ? AND m.body != ''";
-            const params = [fromTs, toTs];
-            if (contactQ) { sql += " AND (m.chatId LIKE ? OR m.sender LIKE ?)"; params.push("%" + contactQ.replace(/\D/g,"") + "%", "%" + contactQ + "%"); }
-            sql += " ORDER BY m.timestamp ASC LIMIT ?"; params.push(limit);
-            db.all(sql, params, (err, rows) => {
-                if (err || !rows || rows.length === 0) { resolve("Nenhuma mensagem encontrada no período solicitado."); return; }
-                const summary = rows.map(r => {
-                    const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
-                    const who = r.fromMe ? "Você" : r.chatId.replace("@c.us","").replace("@lid","");
-                    return `[${t}] ${who}: ${r.body.slice(0,200)}`;
-                }).join("\n");
-                resolve(`Mensagens ${period} (${rows.length}):\n\n${summary}`);
-            });
+            if (contactQ) {
+                // Buscar chat_id(s) do contato no cache
+                db.all("SELECT contact_id, name, phone_number FROM whatsapp_contacts WHERE name LIKE ? OR phone_number LIKE ?",
+                    [`%${contactQ}%`, `%${contactQ.replace(/\D/g, '')}%`], (err, contacts) => {
+                    if (!contacts || contacts.length === 0) {
+                        resolve(`Nenhum contato encontrado com nome ou número semelhante a "${contactQ}".`);
+                        return;
+                    }
+                    const chatIds = contacts.map(c => c.contact_id);
+                    const placeholders = chatIds.map(() => '?').join(',');
+                    const sql = `
+                        SELECT m.chatId, m.body, m.timestamp, m.fromMe, COALESCE(m.contactName, c.name) as displayName
+                        FROM whatsapp_messages m
+                        LEFT JOIN whatsapp_contacts c ON m.chatId = c.contact_id
+                        WHERE m.timestamp >= ? AND m.timestamp <= ? AND m.body != ''
+                          AND m.chatId IN (${placeholders})
+                        ORDER BY m.timestamp ASC
+                        LIMIT ?
+                    `;
+                    const params = [fromTs, toTs, ...chatIds, limit];
+                    db.all(sql, params, (err2, rows) => {
+                        if (err2 || !rows || rows.length === 0) {
+                            resolve(`Nenhuma mensagem encontrada para "${contactQ}" no período solicitado.`);
+                            return;
+                        }
+                        const summary = rows.map(r => {
+                            const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+                            const who = r.fromMe ? "Você" : (r.displayName || r.chatId.replace("@c.us","").replace("@lid",""));
+                            return `[${t}] ${who}: ${r.body.slice(0,200)}`;
+                        }).join("\n");
+                        resolve(`Mensagens ${period} (${rows.length}):\n\n${summary}`);
+                    });
+                });
+            } else {
+                // Sem filtro de contato: todas as mensagens
+                const sql = `
+                    SELECT m.chatId, m.body, m.timestamp, m.fromMe, COALESCE(m.contactName, c.name) as displayName
+                    FROM whatsapp_messages m
+                    LEFT JOIN whatsapp_contacts c ON m.chatId = c.contact_id
+                    WHERE m.timestamp >= ? AND m.timestamp <= ? AND m.body != ''
+                    ORDER BY m.timestamp ASC
+                    LIMIT ?
+                `;
+                db.all(sql, [fromTs, toTs, limit], (err, rows) => {
+                    if (err || !rows || rows.length === 0) {
+                        resolve("Nenhuma mensagem encontrada no período solicitado.");
+                        return;
+                    }
+                    const summary = rows.map(r => {
+                        const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+                        const who = r.fromMe ? "Você" : (r.displayName || r.chatId.replace("@c.us","").replace("@lid",""));
+                        return `[${t}] ${who}: ${r.body.slice(0,200)}`;
+                    }).join("\n");
+                    resolve(`Mensagens ${period} (${rows.length}):\n\n${summary}`);
+                });
+            }
         });
     }
 
@@ -894,7 +1034,7 @@ REGRA MAIS IMPORTANTE — NUNCA ADIVINHE:
 REGRAS DE OURO:
 1. **Tarefas:** Se pedir "todas" as tarefas, use 'consult_tasks' com status='todas'. Para concluir/mudar status, use 'update_task_status'.
 2. **Envio para Empresa Cadastrada:** Se o usuário pedir para enviar mensagem para uma empresa cadastrada no sistema, use SEMPRE 'send_message_to_company'. NUNCA apenas sugira o texto.
-3. **Envio para Contato da Conversa (pessoa/número não empresa):** Se o usuário citar um nome de pessoa ou número que pode ser da lista de conversas do WhatsApp, use PRIMEIRO 'search_whatsapp_contact' para encontrar o chatId correto, depois 'send_message_to_contact'. Nunca adivinhe o número.
+3. **Envio para Contato da Conversa (pessoa/número não empresa):** Se o usuário citar um nome de pessoa ou número que pode ser da lista de conversas do WhatsApp, use PRIMEIRO 'search_whatsapp_contact' para encontrar o chatId correto, depois 'send_message_to_contact'. Nunca adivinhe o número ou construa chatId manualmente.
 4. **Envio por Número Direto:** Se o usuário fornecer um número explícito, use 'send_message_to_phone' diretamente.
 5. **Lembretes Pessoais:** "me lembre de X", "lembrete em Y horas" → use 'set_personal_reminder'. Calcule o datetime ISO correto com base na hora atual do system prompt. O sistema envia automaticamente para o número configurado.
 6. **Resumo de Mensagens WhatsApp:** "resuma mensagens de ontem", "o que fulano me enviou hoje?" → use 'search_whatsapp_messages' com o period e contact_query corretos.
@@ -1005,7 +1145,7 @@ const getWaClientWrapper = (username) => {
         });
 
         // ============================================================
-        // SEÇÃO 2 — CORRIGIR handler 'message' (mensagens RECEBIDAS)
+        // SEÇÃO 2 — handler 'message' (mensagens RECEBIDAS) com cache de contatos
         // ============================================================
         client.on('message', async (msg) => {
             if (msg.from.includes('@g.us') || msg.to.includes('@g.us') || msg.isStatus || (msg.id && msg.id.remote && msg.id.remote.includes('@g.us'))) {
@@ -1016,8 +1156,21 @@ const getWaClientWrapper = (username) => {
             const chatId = msg.from;
             log(`[WhatsApp Inbound] Mensagem recebida de: ${sender} | Body: ${msg.body?.substring(0, 30)}...`);
 
-            // ✅ CORRIGIDO: tipo agora é 'whatsapp_message' (era 'message')
-            // ✅ NOVO: chatId e fromMe incluídos no payload
+            let contactName = null;
+            try {
+                const contact = await msg.getContact();
+                contactName = contact.name || contact.pushname || contact.number || sender;
+            } catch (e) { contactName = sender; }
+
+            // ============================================================
+            // CORREÇÃO 3 — Persistir contato no cache
+            // ============================================================
+            const db = getDb(username);
+            if (db) {
+                const phoneNumber = sender.includes('@c.us') ? sender.replace('@c.us', '') : null;
+                upsertContactCache(db, sender, contactName, phoneNumber);
+            }
+
             const msgPayload = {
                 id: msg.id._serialized,
                 from: msg.from,
@@ -1027,12 +1180,11 @@ const getWaClientWrapper = (username) => {
                 hasMedia: msg.hasMedia,
                 type: msg.type,
                 fromMe: false,
-                chatId: chatId
+                chatId: chatId,
+                contactName: contactName
             };
             broadcastWaEvent(username, 'whatsapp_message', msgPayload);
 
-            // ✅ NOVO: Persistir no banco imediatamente
-            const db = getDb(username);
             if (db) {
                 saveMessageToDb(db, {
                     id: msg.id._serialized,
@@ -1044,6 +1196,8 @@ const getWaClientWrapper = (username) => {
                     hasMedia: msg.hasMedia,
                     type: msg.type
                 });
+                // Atualizar contactName na mensagem
+                db.run("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?", [contactName, msg.id._serialized]);
             }
 
             if (msg.hasMedia) {
@@ -1055,7 +1209,6 @@ const getWaClientWrapper = (username) => {
                         const buffer = Buffer.from(media.data, 'base64');
                         fs.writeFileSync(path.join(UPLOADS_DIR, serverFilename), buffer);
                         
-                        const db = getDb(username);
                         if(db) {
                             db.run('INSERT INTO file_gallery (serverFilename, originalName, mimeType, size, contact, channel, direction, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                                 [serverFilename, originalName, media.mimetype, buffer.length, msg.from, 'whatsapp', 'received', new Date().toISOString()]);
@@ -1067,12 +1220,10 @@ const getWaClientWrapper = (username) => {
             }
 
             try {
-                const db = getDb(username);
                 const settings = await new Promise(resolve => {
                     db.get("SELECT settings FROM user_settings WHERE id = 1", (e, r) => resolve(r ? JSON.parse(r.settings) : null));
                 });
 
-                // Números/LIDs autorizados para acionar a IA
                 const FALLBACK_AUTHORIZED_NUMBER = '557591167094';
                 const FALLBACK_AUTHORIZED_LID = '105403295727623@lid';
                 const LEGACY_LID = '140368205074641@lid';
@@ -1081,19 +1232,15 @@ const getWaClientWrapper = (username) => {
                 let isAuthorized = false;
 
                 if (isLid) {
-                    // Aceita o LID do fallback ou o LID legado
                     isAuthorized = (msg.from === FALLBACK_AUTHORIZED_LID || msg.from === LEGACY_LID);
-                    // Também aceita LID configurado nas settings
                     if (!isAuthorized && settings?.authorizedLid) {
                         isAuthorized = (msg.from === settings.authorizedLid);
                     }
                 } else {
                     const senderNumber = msg.from.replace('@c.us', '').replace(/\D/g, '');
-                    // Aceita o número do fallback
                     if (senderNumber === FALLBACK_AUTHORIZED_NUMBER.replace(/\D/g, '')) {
                         isAuthorized = true;
                     }
-                    // Aceita número configurado nas settings
                     if (!isAuthorized && settings?.dailySummaryNumber) {
                         const authorizedNumber = settings.dailySummaryNumber.replace(/\D/g, '');
                         isAuthorized = senderNumber.endsWith(authorizedNumber);
@@ -1145,13 +1292,23 @@ const getWaClientWrapper = (username) => {
         });
 
         // ============================================================
-        // SEÇÃO 3 — CORRIGIR handler 'message_create' (mensagens ENVIADAS)
+        // SEÇÃO 3 — handler 'message_create' (mensagens ENVIADAS)
         // ============================================================
         client.on('message_create', async (msg) => {
             if (msg.fromMe) {
                 const chatId = msg.to;
+                let contactName = null;
+                try {
+                    const contact = await msg.getContact();
+                    contactName = contact.name || contact.pushname || contact.number || chatId;
+                } catch (e) { contactName = chatId; }
 
-                // ✅ CORRIGIDO: tipo 'whatsapp_message' + chatId + fromMe no payload
+                const db = getDb(username);
+                if (db) {
+                    const phoneNumber = chatId.includes('@c.us') ? chatId.replace('@c.us', '') : null;
+                    upsertContactCache(db, chatId, contactName, phoneNumber);
+                }
+
                 broadcastWaEvent(username, 'whatsapp_message', {
                     id: msg.id._serialized,
                     from: msg.from,
@@ -1161,11 +1318,10 @@ const getWaClientWrapper = (username) => {
                     hasMedia: msg.hasMedia,
                     type: msg.type,
                     fromMe: true,
-                    chatId: chatId
+                    chatId: chatId,
+                    contactName: contactName
                 });
 
-                // ✅ NOVO: Persistir mensagem enviada no banco
-                const db = getDb(username);
                 if (db) {
                     saveMessageToDb(db, {
                         id: msg.id._serialized,
@@ -1177,6 +1333,7 @@ const getWaClientWrapper = (username) => {
                         hasMedia: msg.hasMedia,
                         type: msg.type
                     });
+                    db.run("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?", [contactName, msg.id._serialized]);
                 }
             }
         });
@@ -1306,7 +1463,7 @@ const buildEmailHtml = (messageBody, documents, emailSignature) => {
         const sortedDocs = [...documents].sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
         let rows = '';
         sortedDocs.forEach(doc => {
-            rows += `<tr style="border-bottom: 1px solid #eee;"><td style="padding: 10px; color: #333;">${doc.docName}</td><td style="padding: 10px; color: #555;">${doc.category}</td><td style="padding: 10px; color: #555;">${doc.dueDate || 'N/A'}</td><td style="padding: 10px; color: #555;">${doc.competence}</td></tr>`;
+            rows += `<tr style="border-bottom: 1px solid #eee;"><td style="padding: 10px; color: #333;">${doc.docName}<tr><td style="padding: 10px; color: #555;">${doc.category}</td><td style="padding: 10px; color: #555;">${doc.dueDate || 'N/A'}</td><td style="padding: 10px; color: #555;">${doc.competence}</td></tr>`;
         });
         docsTable = `<h3 style="color: #2c3e50; border-bottom: 2px solid #eff6ff; padding-bottom: 10px; margin-top: 30px; font-size: 16px;">Documentos em Anexo:</h3><table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;"><thead><tr style="background-color: #f8fafc; color: #64748b;"><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Documento</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Categoria</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Vencimento</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Competência</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
@@ -1320,7 +1477,6 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
         const username = req.user;
         const msg = req.body.message;
         const historyContext = req.body.historyContext || '';
-        // Prepend local history context to the message for better AI continuity
         const enrichedMsg = historyContext
             ? `[Contexto do histórico local de conversas com a IA:\n${historyContext}\n---\nMensagem atual:]\n${msg}`
             : msg;
@@ -1544,7 +1700,6 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
             fromMe: m.fromMe
         }));
 
-        // ✅ NOVO: Persistir no banco as mensagens trazidas pelo scroll
         const db = getDb(req.user);
         if (db) {
             const chatId = req.params.chatId;
@@ -1562,6 +1717,17 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
                     type: m.type
                 }));
             saveMessagesToDb(db, toSave);
+            // Atualizar nomes dos contatos em lote
+            for (const m of toSave) {
+                if (m.sender && !m.sender.includes('@g.us')) {
+                    try {
+                        const contact = await wrapper.client.getContactById(m.sender);
+                        const name = contact.name || contact.pushname || contact.number || m.sender;
+                        upsertContactCache(db, m.sender, name, m.sender.includes('@c.us') ? m.sender.replace('@c.us','') : null);
+                        db.run("UPDATE whatsapp_messages SET contactName = ? WHERE chatId = ? AND sender = ?", [name, chatId, m.sender]);
+                    } catch (e) {}
+                }
+            }
         }
 
         res.json(mapped.map(m => ({
@@ -1578,7 +1744,7 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
 });
 
 // ============================================================
-// SEÇÃO 4 — NOVA ROTA: GET /api/whatsapp/messages-db/:chatId
+// SEÇÃO 4 — Rota /api/whatsapp/messages-db/:chatId (mantida)
 // ============================================================
 app.get('/api/whatsapp/messages-db/:chatId', authenticateToken, async (req, res) => {
     try {
@@ -1623,9 +1789,6 @@ app.get('/api/whatsapp/messages-db/:chatId', authenticateToken, async (req, res)
     }
 });
 
-// ============================================================
-// SEÇÃO 5 — NOVA ROTA: GET /api/whatsapp/sync-status/:chatId
-// ============================================================
 app.get('/api/whatsapp/sync-status/:chatId', authenticateToken, async (req, res) => {
     try {
         const db = getDb(req.user);
@@ -1649,9 +1812,6 @@ app.get('/api/whatsapp/sync-status/:chatId', authenticateToken, async (req, res)
     }
 });
 
-// ============================================================
-// SEÇÃO 6 — NOVA ROTA: POST /api/whatsapp/load-history/:chatId
-// ============================================================
 app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
@@ -1689,12 +1849,10 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         let seenIds = new Set();
         let reachedLimit = false;
 
-        // Busca inicial
         let fetchedBatch = await chat.fetchMessages({ limit: 100 });
         let lastOldestId = null;
 
         while (fetchedBatch && fetchedBatch.length > 0 && !reachedLimit) {
-            // Detecta loop infinito: msg mais antiga igual ao batch anterior
             const currentOldest = fetchedBatch.reduce((o, m) => m.timestamp < o.timestamp ? m : o, fetchedBatch[0]);
             if (lastOldestId && currentOldest.id._serialized === lastOldestId) {
                 log('[History] Loop detectado (API sem suporte a cursor before). Parando.');
@@ -1702,7 +1860,6 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
             }
             lastOldestId = currentOldest.id._serialized;
 
-            // Filtra duplicatas e msgs fora do período
             const inPeriod = fetchedBatch.filter(m => {
                 if (seenIds.has(m.id._serialized)) return false;
                 seenIds.add(m.id._serialized);
@@ -1712,19 +1869,14 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
             allMessages = [...allMessages, ...inPeriod];
             log(`[History] Batch: ${fetchedBatch.length} msgs | No período: ${inPeriod.length} | Acumulado: ${allMessages.length}`);
 
-            // Chegou antes do período de 45 dias
             if (fetchedBatch.some(m => m.timestamp < FORTY_FIVE_DAYS_AGO)) {
                 reachedLimit = true;
                 break;
             }
 
-            // Menos mensagens que o limite: sem mais histórico
             if (fetchedBatch.length < 100) break;
-
-            // Limite de segurança
             if (allMessages.length >= 3000) break;
 
-            // Próximo batch usando cursor before na msg mais antiga
             try {
                 fetchedBatch = await chat.fetchMessages({
                     limit: 100,
@@ -1748,6 +1900,18 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         }));
 
         await saveMessagesToDb(db, toSave);
+
+        // Atualizar cache de contatos e contactName nas mensagens
+        for (const m of toSave) {
+            if (m.sender && !m.sender.includes('@g.us')) {
+                try {
+                    const contact = await wrapper.client.getContactById(m.sender);
+                    const name = contact.name || contact.pushname || contact.number || m.sender;
+                    upsertContactCache(db, m.sender, name, m.sender.includes('@c.us') ? m.sender.replace('@c.us','') : null);
+                    db.run("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?", [name, m.id]);
+                } catch (e) {}
+            }
+        }
 
         const now = Math.floor(Date.now() / 1000);
         db.run(
@@ -2172,9 +2336,6 @@ app.get('/api/file-gallery/download/:id', authenticateToken, (req, res) => {
     });
 });
 
-// ============================================================
-// SEÇÃO 7 — NOVA ROTA: GET /api/file-gallery/view/:id
-// ============================================================
 app.get('/api/file-gallery/view/:id', authenticateToken, (req, res) => {
     const db = getDb(req.user);
     db.get(`SELECT serverFilename, originalName, mimeType FROM file_gallery WHERE id = ?`, [req.params.id], (err, row) => {
@@ -2223,7 +2384,6 @@ setInterval(() => {
                 try {
                     if (msg.targetType === 'personal') {
                         if (clientReady) {
-                            // Use configured number, or fallback to 557591167094
                             const FALLBACK_REMINDER_NUMBER = '557591167094';
                             const FALLBACK_REMINDER_LID = '105403295727623@lid';
                             let chatId;
@@ -2238,7 +2398,6 @@ setInterval(() => {
                                 await safeSendMessage(waWrapper.client, chatId, `⏰ *Lembrete:* ${msg.message}`);
                                 log(`[CRON] Lembrete pessoal enviado para ${chatId}`);
                             } catch (lidErr) {
-                                // If LID fails, try phone number
                                 log(`[CRON] Falha com LID, tentando número: ${lidErr.message}`);
                                 const fallbackPhone = `${FALLBACK_REMINDER_NUMBER}@c.us`;
                                 await safeSendMessage(waWrapper.client, fallbackPhone, `⏰ *Lembrete:* ${msg.message}`);
