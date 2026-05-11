@@ -528,14 +528,14 @@ const assistantTools = [
     },
     {
         name: "send_message_to_contact",
-        description: "Envia mensagem WhatsApp para um contato da lista de conversas (não necessariamente empresa cadastrada). Use o chat_id retornado por search_whatsapp_contact. NUNCA adivinhe ou construa o chat_id manualmente.",
+        description: "Envia mensagem WhatsApp para um contato da lista de conversas. Aceita nome, número ou chat_id — a resolução é feita internamente pelo cache. NÃO é necessário copiar o chat_id de search_whatsapp_contact; basta informar o nome ou número.",
         parameters: {
             type: Type.OBJECT,
             properties: {
-                chat_id: { type: Type.STRING, description: "chatId do contato (ex: 5575999999999@c.us ou LID@lid). Obtido via search_whatsapp_contact." },
+                contact_query: { type: Type.STRING, description: "Nome, número (com ou sem DDI) ou chat_id do contato (ex: 'João', '5575999999999', '5575999999999@c.us'). Preferir nome quando disponível." },
                 message: { type: Type.STRING, description: "Texto da mensagem." }
             },
-            required: ["chat_id", "message"]
+            required: ["contact_query", "message"]
         }
     },
     {
@@ -841,13 +841,16 @@ const executeTool = async (name, args, db, username) => {
                                 const contactId = await waWrapper.client.getNumberId(numberPart);
                                 if (contactId && contactId._serialized !== chatId) {
                                     if (!results.some(r => r.chat_id === contactId._serialized)) {
-                                        results.push({
+                                        const resolvedEntry = {
                                             chat_id: contactId._serialized,
                                             name: chat.name,
                                             phone_number: numberPart,
                                             chat_id_type: contactId._serialized.includes('@lid') ? 'lid' : 'c.us',
                                             source: 'chat_resolved'
-                                        });
+                                        };
+                                        results.push(resolvedEntry);
+                                        // FIX 2 — persistir no cache o ID resolvido
+                                        upsertContactCache(db, contactId._serialized, chat.name, numberPart);
                                     }
                                     continue;
                                 }
@@ -861,6 +864,8 @@ const executeTool = async (name, args, db, username) => {
                         chat_id_type: isLid ? 'lid' : 'c.us',
                         source: 'chat'
                     });
+                    // FIX 2 — persistir no cache mesmo os encontrados diretamente
+                    upsertContactCache(db, chatId, chat.name, isLid ? null : phone);
                     if (results.length >= 5) break;
                 }
             }
@@ -885,12 +890,80 @@ const executeTool = async (name, args, db, username) => {
         }
     }
 
+    // ============================================================
+    // FIX 3 — send_message_to_contact resolve pelo cache internamente
+    // ============================================================
     if (name === "send_message_to_contact") {
         const waWrapper = getWaClientWrapper(username);
         if (!waWrapper || waWrapper.status !== "connected") return "WhatsApp não conectado.";
+
+        // Aceita tanto contact_query (novo) quanto chat_id (retrocompat)
+        const query = (args.contact_query || args.chat_id || "").trim();
+        if (!query) return "❌ Informe o nome, número ou chat_id do contato.";
+
         try {
-            await safeSendMessage(waWrapper.client, args.chat_id, args.message);
-            return `✅ Mensagem enviada para ${args.chat_id}.`;
+            let resolvedChatId = null;
+
+            // 1) Buscar no cache por nome, telefone ou contact_id exato
+            const phoneQuery = query.replace(/\D/g, '');
+            const cacheRow = await new Promise(resolve => {
+                db.get(
+                    `SELECT contact_id FROM whatsapp_contacts
+                     WHERE contact_id = ? OR phone_number = ?
+                     OR name LIKE ? OR phone_number LIKE ?
+                     LIMIT 1`,
+                    [query, phoneQuery, `%${query}%`, `%${phoneQuery}%`],
+                    (err, row) => resolve(row || null)
+                );
+            });
+
+            if (cacheRow) {
+                resolvedChatId = cacheRow.contact_id;
+                log(`[AI Tool] send_message_to_contact: resolvido via cache → ${resolvedChatId}`);
+            }
+
+            // 2) Se não achou no cache, faz varredura nos chats ao vivo
+            if (!resolvedChatId) {
+                log(`[AI Tool] send_message_to_contact: "${query}" não no cache, buscando em chats ao vivo`);
+                const lowerQuery = query.toLowerCase();
+                const chats = await waWrapper.client.getChats();
+                for (const chat of chats) {
+                    if (chat.isGroup) continue;
+                    const chatId = chat.id._serialized;
+                    const chatPhone = chatId.replace('@c.us', '').replace('@lid', '').replace(/\D/g, '');
+                    const nameMatch = (chat.name || '').toLowerCase().includes(lowerQuery);
+                    const phoneMatch = phoneQuery.length >= 8 && chatPhone.includes(phoneQuery);
+                    const idMatch = chatId === query;
+                    if (!nameMatch && !phoneMatch && !idMatch) continue;
+
+                    let finalId = chatId;
+                    const isLid = chatId.includes('@lid');
+                    if (!isLid && chatPhone) {
+                        try {
+                            const numberId = await waWrapper.client.getNumberId(chatPhone);
+                            if (numberId && numberId._serialized) finalId = numberId._serialized;
+                        } catch (_) {}
+                    }
+                    // Persistir para próximas vezes
+                    upsertContactCache(db, finalId, chat.name || chatId, isLid ? null : chatPhone);
+                    resolvedChatId = finalId;
+                    log(`[AI Tool] send_message_to_contact: resolvido via chat ao vivo → ${resolvedChatId}`);
+                    break;
+                }
+            }
+
+            // 3) Último recurso: tratar query como chat_id direto
+            if (!resolvedChatId && query.includes('@')) {
+                resolvedChatId = query;
+                log(`[AI Tool] send_message_to_contact: usando query como chat_id direto → ${resolvedChatId}`);
+            }
+
+            if (!resolvedChatId) {
+                return `❌ Contato "${query}" não encontrado no cache nem nos chats. Use search_whatsapp_contact para localizar o contato primeiro.`;
+            }
+
+            await safeSendMessage(waWrapper.client, resolvedChatId, args.message);
+            return `✅ Mensagem enviada para ${resolvedChatId}.`;
         } catch (e) {
             return `❌ Erro ao enviar: ${e.message}`;
         }
@@ -1034,7 +1107,7 @@ REGRA MAIS IMPORTANTE — NUNCA ADIVINHE:
 REGRAS DE OURO:
 1. **Tarefas:** Se pedir "todas" as tarefas, use 'consult_tasks' com status='todas'. Para concluir/mudar status, use 'update_task_status'.
 2. **Envio para Empresa Cadastrada:** Se o usuário pedir para enviar mensagem para uma empresa cadastrada no sistema, use SEMPRE 'send_message_to_company'. NUNCA apenas sugira o texto.
-3. **Envio para Contato da Conversa (pessoa/número não empresa):** Se o usuário citar um nome de pessoa ou número que pode ser da lista de conversas do WhatsApp, use PRIMEIRO 'search_whatsapp_contact' para encontrar o chatId correto, depois 'send_message_to_contact'. Nunca adivinhe o número ou construa chatId manualmente.
+3. **Envio para Contato da Conversa (pessoa/número não empresa):** Se o usuário citar um nome de pessoa ou número que pode ser da lista de conversas do WhatsApp, use 'send_message_to_contact' passando o nome ou número em 'contact_query'. A ferramenta resolve o contato internamente — NÃO é necessário chamar 'search_whatsapp_contact' antes. Use 'search_whatsapp_contact' apenas se quiser ver quais contatos existem antes de decidir para quem enviar.
 4. **Envio por Número Direto:** Se o usuário fornecer um número explícito, use 'send_message_to_phone' diretamente.
 5. **Lembretes Pessoais:** "me lembre de X", "lembrete em Y horas" → use 'set_personal_reminder'. Calcule o datetime ISO correto com base na hora atual do system prompt. O sistema envia automaticamente para o número configurado.
 6. **Resumo de Mensagens WhatsApp:** "resuma mensagens de ontem", "o que fulano me enviou hoje?" → use 'search_whatsapp_messages' com o period e contact_query corretos.
@@ -1347,11 +1420,47 @@ const getWaClientWrapper = (username) => {
             }); 
         });
         
-        client.on('ready', () => { 
+        client.on('ready', async () => { 
             log(`[WhatsApp Event] CLIENTE PRONTO (${username})`);
             waClients[username].status = 'connected';
             waClients[username].qr = null;
             waClients[username].info = client.info;
+
+            // ============================================================
+            // FIX 1 — Popular cache de contatos proativamente ao conectar
+            // ============================================================
+            try {
+                const db = getDb(username);
+                if (db) {
+                    const chats = await client.getChats();
+                    let seeded = 0;
+                    for (const chat of chats) {
+                        if (chat.isGroup) continue;
+                        const chatId = chat.id._serialized;
+                        if (!chatId) continue;
+                        const isLid = chatId.includes('@lid');
+                        let resolvedId = chatId;
+                        let phone = isLid ? null : chatId.replace('@c.us', '').replace(/\D/g, '');
+
+                        // Para @c.us, tenta resolver para LID via getNumberId
+                        if (!isLid && phone) {
+                            try {
+                                const numberId = await client.getNumberId(phone);
+                                if (numberId && numberId._serialized) {
+                                    resolvedId = numberId._serialized;
+                                }
+                            } catch (_) {}
+                        }
+
+                        const contactName = chat.name || chat.id.user || resolvedId;
+                        upsertContactCache(db, resolvedId, contactName, phone);
+                        seeded++;
+                    }
+                    log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
+                }
+            } catch (e) {
+                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${e.message}`);
+            }
         });
         
         client.on('authenticated', () => {
