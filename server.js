@@ -544,9 +544,9 @@ const assistantTools = [
         parameters: {
             type: Type.OBJECT,
             properties: {
-                contact_query: { type: Type.STRING, description: "Nome ou número do contato (opcional, deixe vazio para todos)." },
-                period: { type: Type.STRING, enum: ["hoje", "ontem", "ultimas24h", "semana"], description: "Período das mensagens." },
-                limit: { type: Type.NUMBER, description: "Número máximo de mensagens a retornar. Padrão: 20." }
+                contact_query: { type: Type.STRING, description: "Nome ou número do contato (opcional, deixe vazio para resumo geral de quem me mandou mensagem)." },
+                period: { type: Type.STRING, enum: ["hoje", "ontem", "ultimas24h", "semana", "semana_passada", "dias15"], description: "Período das mensagens. 'semana' = últimos 7 dias. 'semana_passada' = segunda a domingo da semana anterior. 'dias15' = últimos 15 dias." },
+                limit: { type: Type.NUMBER, description: "Número máximo de mensagens por contato (quando contact_query fornecido). Padrão: 5, máximo: 10." }
             }
         }
     }
@@ -970,13 +970,14 @@ const executeTool = async (name, args, db, username) => {
     }
 
     // ============================================================
-    // CORREÇÃO 5 — search_whatsapp_messages reescrita
+    // CORREÇÃO 6 — search_whatsapp_messages reescrita
     // ============================================================
     if (name === "search_whatsapp_messages") {
         const now = new Date();
         const brNow = new Date(now.getTime() - 3 * 3600 * 1000);
         const period = args.period || "hoje";
-        const limit = Math.min(args.limit || 20, 50);
+        // limit só se aplica quando há contact_query (mensagens por contato específico)
+        const msgPerContact = Math.min(args.limit || 5, 10);
         const contactQ = (args.contact_query || "").trim();
 
         let fromTs = 0, toTs = Math.floor(brNow.getTime() / 1000);
@@ -989,11 +990,21 @@ const executeTool = async (name, args, db, username) => {
             fromTs = Math.floor((brNow.getTime() - 86400000) / 1000);
         } else if (period === "semana") {
             fromTs = Math.floor((brNow.getTime() - 7 * 86400000) / 1000);
+        } else if (period === "semana_passada") {
+            // segunda a domingo da semana anterior
+            const weekday = brNow.getDay(); // 0=dom, 1=seg...
+            const diffToLastMon = (weekday === 0 ? 6 : weekday - 1) + 7;
+            const lastMon = new Date(brNow); lastMon.setDate(brNow.getDate() - diffToLastMon); lastMon.setHours(0,0,0,0);
+            const lastSun = new Date(lastMon); lastSun.setDate(lastMon.getDate() + 6); lastSun.setHours(23,59,59,999);
+            fromTs = Math.floor(lastMon.getTime() / 1000);
+            toTs   = Math.floor(lastSun.getTime() / 1000);
+        } else if (period === "dias15") {
+            fromTs = Math.floor((brNow.getTime() - 15 * 86400000) / 1000);
         }
 
         return new Promise(resolve => {
             if (contactQ) {
-                // Buscar chat_id(s) do contato no cache
+                // ── MODO CONTATO ESPECÍFICO: últimas N mensagens do contato ──
                 db.all("SELECT contact_id, name, phone_number FROM whatsapp_contacts WHERE name LIKE ? OR phone_number LIKE ?",
                     [`%${contactQ}%`, `%${contactQ.replace(/\D/g, '')}%`], (err, contacts) => {
                     if (!contacts || contacts.length === 0) {
@@ -1008,44 +1019,74 @@ const executeTool = async (name, args, db, username) => {
                         LEFT JOIN whatsapp_contacts c ON m.chatId = c.contact_id
                         WHERE m.timestamp >= ? AND m.timestamp <= ? AND m.body != ''
                           AND m.chatId IN (${placeholders})
-                        ORDER BY m.timestamp ASC
+                        ORDER BY m.timestamp DESC
                         LIMIT ?
                     `;
-                    const params = [fromTs, toTs, ...chatIds, limit];
-                    db.all(sql, params, (err2, rows) => {
+                    db.all(sql, [fromTs, toTs, ...chatIds, msgPerContact], (err2, rows) => {
                         if (err2 || !rows || rows.length === 0) {
                             resolve(`Nenhuma mensagem encontrada para "${contactQ}" no período solicitado.`);
                             return;
                         }
-                        const summary = rows.map(r => {
+                        const summary = rows.reverse().map(r => {
                             const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
                             const who = r.fromMe ? "Você" : (r.displayName || r.chatId.replace("@c.us","").replace("@lid",""));
-                            return `[${t}] ${who}: ${r.body.slice(0,200)}`;
+                            return `[${t}] ${who}: ${r.body.slice(0,150)}`;
                         }).join("\n");
-                        resolve(`Mensagens ${period} (${rows.length}):\n\n${summary}`);
+                        resolve(`Últimas ${rows.length} mensagens com "${contactQ}" (${period}):\n\n${summary}`);
                     });
                 });
             } else {
-                // Sem filtro de contato: todas as mensagens
-                const sql = `
-                    SELECT m.chatId, m.body, m.timestamp, m.fromMe, COALESCE(m.contactName, c.name) as displayName
+                // ── MODO RESUMO GERAL: 1 linha por remetente, com até 5 msgs de amostra ──
+                // Passo 1: buscar todos os remetentes únicos do período
+                const sqlContatos = `
+                    SELECT
+                        m.chatId,
+                        COALESCE(m.contactName, c.name, REPLACE(REPLACE(m.chatId,'@c.us',''),'@lid','')) as displayName,
+                        COUNT(*) as total,
+                        MAX(m.timestamp) as lastTs
                     FROM whatsapp_messages m
                     LEFT JOIN whatsapp_contacts c ON m.chatId = c.contact_id
-                    WHERE m.timestamp >= ? AND m.timestamp <= ? AND m.body != ''
-                    ORDER BY m.timestamp ASC
-                    LIMIT ?
+                    WHERE m.timestamp >= ? AND m.timestamp <= ?
+                      AND m.fromMe = 0 AND m.body != ''
+                    GROUP BY m.chatId
+                    ORDER BY lastTs DESC
+                    LIMIT 50
                 `;
-                db.all(sql, [fromTs, toTs, limit], (err, rows) => {
-                    if (err || !rows || rows.length === 0) {
-                        resolve("Nenhuma mensagem encontrada no período solicitado.");
+                db.all(sqlContatos, [fromTs, toTs], (err, contatos) => {
+                    if (err || !contatos || contatos.length === 0) {
+                        resolve("Nenhuma mensagem recebida no período solicitado.");
                         return;
                     }
-                    const summary = rows.map(r => {
-                        const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
-                        const who = r.fromMe ? "Você" : (r.displayName || r.chatId.replace("@c.us","").replace("@lid",""));
-                        return `[${t}] ${who}: ${r.body.slice(0,200)}`;
-                    }).join("\n");
-                    resolve(`Mensagens ${period} (${rows.length}):\n\n${summary}`);
+                    // Passo 2: para cada contato, buscar as últimas 5 mensagens recebidas
+                    let pending = contatos.length;
+                    const results = contatos.map(c => ({ ...c, msgs: [] }));
+
+                    results.forEach((ct, i) => {
+                        db.all(
+                            `SELECT body, timestamp FROM whatsapp_messages
+                             WHERE chatId = ? AND fromMe = 0 AND body != ''
+                               AND timestamp >= ? AND timestamp <= ?
+                             ORDER BY timestamp DESC LIMIT 5`,
+                            [ct.chatId, fromTs, toTs],
+                            (e2, msgs) => {
+                                ct.msgs = msgs ? msgs.reverse() : [];
+                                pending--;
+                                if (pending === 0) {
+                                    // Montar resumo final
+                                    const lines = results.map(ct => {
+                                        const lastTime = new Date(ct.lastTs * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+                                        const header = `📱 ${ct.displayName} — ${ct.total} msg(s) | última: ${lastTime}`;
+                                        const amostras = ct.msgs.map(m => {
+                                            const t = new Date(m.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+                                            return `   [${t}] ${m.body.slice(0,120)}`;
+                                        }).join("\n");
+                                        return `${header}\n${amostras}`;
+                                    }).join("\n\n");
+                                    resolve(`${contatos.length} contato(s) enviaram mensagens (${period}):\n\n${lines}`);
+                                }
+                            }
+                        );
+                    });
                 });
             }
         });
@@ -1054,16 +1095,23 @@ const executeTool = async (name, args, db, username) => {
     return "Ferramenta desconhecida.";
 };
 
-// --- HELPER: Retry Logic for 429 Errors ---
-const runWithRetry = async (fn, retries = 3, delay = 2000) => {
+// --- HELPER: Retry Logic for 429 / 503 Errors ---
+const runWithRetry = async (fn, retries = 5, delay = 2000) => {
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (error) {
-            const isRateLimit = error.message?.includes('429') || error.status === 429;
-            if (!isRateLimit || i === retries - 1) throw error;
+            const msg = error.message || '';
+            const status = error.status || 0;
+            const isRetryable =
+                status === 429 || msg.includes('429') ||
+                status === 503 || msg.includes('503') ||
+                msg.toLowerCase().includes('high demand') ||
+                msg.toLowerCase().includes('overloaded') ||
+                msg.toLowerCase().includes('overload');
+            if (!isRetryable || i === retries - 1) throw error;
             const waitTime = delay * Math.pow(2, i);
-            log(`[AI Retry] Aguardando ${waitTime/1000}s...`);
+            log(`[AI Retry] Tentativa ${i + 1}/${retries} — erro ${status || msg.slice(0,40)} — aguardando ${waitTime/1000}s...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
     }
@@ -1159,7 +1207,9 @@ SEGURANÇA:
         log("[AI Error]", e);
         if (e.message?.includes('404')) return "Erro: Modelo de IA não encontrado. Verifique as configurações do servidor.";
         if (e.message?.includes('429')) return "Muitas requisições à IA no momento. Aguarde alguns segundos e tente novamente.";
-        return `Desculpe, ocorreu um erro interno (${e.message?.slice(0,80) || 'desconhecido'}). Tente novamente.`;
+        if (e.status === 503 || e.message?.includes('503') || e.message?.toLowerCase().includes('high demand') || e.message?.toLowerCase().includes('overload'))
+            return "O modelo de IA está sobrecarregado no momento. Aguarde alguns instantes e tente novamente.";
+        return `Desculpe, ocorreu um erro interno. Tente novamente em instantes.`;
     }
 };
 
