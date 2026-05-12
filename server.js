@@ -906,15 +906,35 @@ const executeTool = async (name, args, db, username) => {
 
             // 1) Buscar no cache por nome, telefone ou contact_id exato
             const phoneQuery = query.replace(/\D/g, '');
+            // BUGFIX: só incluir condições de telefone quando phoneQuery tem dígitos suficientes
+            // para evitar que phone_number LIKE '%%' case com TODOS os contatos do banco
+            const hasPhoneDigits = phoneQuery.length >= 6;
             const cacheRow = await new Promise(resolve => {
-                db.get(
-                    `SELECT contact_id FROM whatsapp_contacts
-                     WHERE contact_id = ? OR phone_number = ?
-                     OR name LIKE ? OR phone_number LIKE ?
-                     LIMIT 1`,
-                    [query, phoneQuery, `%${query}%`, `%${phoneQuery}%`],
-                    (err, row) => resolve(row || null)
-                );
+                if (hasPhoneDigits) {
+                    db.get(
+                        `SELECT contact_id FROM whatsapp_contacts
+                         WHERE contact_id = ? OR phone_number = ?
+                         OR name LIKE ? OR phone_number LIKE ?
+                         ORDER BY
+                           CASE WHEN contact_id LIKE '%@lid' THEN 0 ELSE 1 END,
+                           last_seen DESC
+                         LIMIT 1`,
+                        [query, phoneQuery, `%${query}%`, `%${phoneQuery}%`],
+                        (err, row) => resolve(row || null)
+                    );
+                } else {
+                    // Busca apenas por contact_id exato ou nome — sem condição de telefone vazia
+                    db.get(
+                        `SELECT contact_id FROM whatsapp_contacts
+                         WHERE contact_id = ? OR name LIKE ?
+                         ORDER BY
+                           CASE WHEN contact_id LIKE '%@lid' THEN 0 ELSE 1 END,
+                           last_seen DESC
+                         LIMIT 1`,
+                        [query, `%${query}%`],
+                        (err, row) => resolve(row || null)
+                    );
+                }
             });
 
             if (cacheRow) {
@@ -938,14 +958,24 @@ const executeTool = async (name, args, db, username) => {
 
                     let finalId = chatId;
                     const isLid = chatId.includes('@lid');
+                    // Sempre tenta obter o LID via getNumberId, independente do formato atual
                     if (!isLid && chatPhone) {
                         try {
                             const numberId = await waWrapper.client.getNumberId(chatPhone);
-                            if (numberId && numberId._serialized) finalId = numberId._serialized;
+                            if (numberId && numberId._serialized) {
+                                finalId = numberId._serialized; // pode ser @lid ou @c.us
+                            }
                         } catch (_) {}
                     }
-                    // Persistir para próximas vezes
-                    upsertContactCache(db, finalId, chat.name || chatId, isLid ? null : chatPhone);
+                    // Persistir: se resolveu LID, salva LID como contact_id e mantém o telefone
+                    // Se o chat original era @c.us mas getNumberId retornou @lid, persiste os dois
+                    const phoneToStore = chatPhone || null;
+                    upsertContactCache(db, finalId, chat.name || chatId, phoneToStore);
+                    // Se tínhamos @c.us original e resolvemos para @lid, garante que o @c.us
+                    // também aponte para o mesmo nome/telefone (para buscas futuras por número)
+                    if (!isLid && finalId.includes('@lid')) {
+                        upsertContactCache(db, chatId, chat.name || chatId, phoneToStore);
+                    }
                     resolvedChatId = finalId;
                     log(`[AI Tool] send_message_to_contact: resolvido via chat ao vivo → ${resolvedChatId}`);
                     break;
