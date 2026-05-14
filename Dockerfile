@@ -1,58 +1,51 @@
-# Estágio 1: Build do Frontend e Dependências
+# ─── Estágio 1: Build ───────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Instala ferramentas necessárias para compilar módulos nativos (sqlite3) e git para dependências do GitHub
+# Ferramentas para compilar módulos nativos (better-sqlite3) e git para o whatsapp-web.js
 RUN apk add --no-cache python3 make g++ git
 
 COPY package*.json ./
 
-# Instala todas as dependências (incluindo dev e nativas)
-# O git é necessário aqui para baixar 'whatsapp-web.js' do GitHub
+# npm install já compila o better-sqlite3 nativamente aqui
 RUN npm install
 
 COPY . .
 
-# Build do Frontend (Vite)
+# Build do frontend (Vite)
 RUN npm run build
 
-# Estágio 2: Produção (Alpine + Chromium)
-FROM node:22-alpine
 
-# Instala o Chromium do sistema e dependências gráficas necessárias para o Puppeteer
+# ─── Estágio 2: Produção ────────────────────────────────────────────────────
+FROM node:22-alpine
+WORKDIR /app
+
+# Chromium do sistema (para o Puppeteer/whatsapp-web.js) + dependências gráficas
 RUN apk add --no-cache \
     chromium \
     nss \
     freetype \
     harfbuzz \
     ca-certificates \
-    ttf-freefont \
-    nodejs \
-    yarn \
-    git
+    ttf-freefont
 
-WORKDIR /app
-
-# Variáveis para usar o Chromium do sistema
+# Usa o Chromium instalado pelo sistema, sem baixar um separado
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
     DATA_PATH=/app/data
 
-# Copia package.json
 COPY package*.json ./
 
-# Copia as dependências já instaladas/compiladas do estágio anterior
+# Copia node_modules já compilados (incluindo o better-sqlite3 nativo)
+# Ambos os estágios usam node:22-alpine, então os binários são compatíveis
 COPY --from=builder /app/node_modules ./node_modules
 
-# Copia servidor e frontend buildado
 COPY server.js ./
 COPY --from=builder /app/dist ./dist
 
-# Cria diretórios necessários e ajusta permissões
-RUN mkdir -p /app/data/whatsapp_auth && \
-    mkdir -p /app/data/uploads && \
+RUN mkdir -p /app/data/whatsapp_auth /app/data/uploads && \
     chown -R node:node /app
 
 USER node
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
