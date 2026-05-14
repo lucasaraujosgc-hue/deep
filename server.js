@@ -414,10 +414,10 @@ const assistantTools = [
                     properties: {
                         whatsapp: { type: Type.BOOLEAN },
                         email: { type: Type.BOOLEAN }
-                    },
-                    required: ["company_name_search", "message_body"]
+                    }
                 }
-            }
+            },
+            required: ["company_name_search", "message_body"]
         }
     },
     {
