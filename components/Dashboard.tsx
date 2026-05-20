@@ -967,7 +967,12 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                                               loading="lazy"
                                                           />
                                                       )}
-                                                      {msg.type === 'document' && msgIdStr && !isOptimistic && (
+                                                      {msg.type === 'document' && msgIdStr && !isOptimistic && (() => {
+                                                          // No whatsapp-web.js, msg.body para documents é o filename original
+                                                          const docFilename = (msg.body && msg.body.includes('.'))
+                                                              ? msg.body
+                                                              : `documento_${new Date(msg.timestamp * 1000).toLocaleDateString('pt-BR').replace(/\//g, '-')}.pdf`;
+                                                          return (
                                                           <div className="flex gap-2 mt-2">
                                                               <button 
                                                                   onClick={() => {
@@ -976,22 +981,26 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                                                   }}
                                                                   className="flex-1 flex items-center justify-center p-2 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 text-blue-700 text-sm font-medium transition-colors gap-1"
                                                               >
-                                                                  <FileText className="w-4 h-4" /> Visualizar
+                                                                  <FileText className="w-4 h-4" />
+                                                                  <span className="truncate max-w-[120px]" title={docFilename}>
+                                                                      {docFilename}
+                                                                  </span>
                                                               </button>
                                                               <a
                                                                   href={`/api/whatsapp/media/${msgIdStr}?token=${localStorage.getItem('cm_auth_token')}`}
-                                                                  download
+                                                                  download={docFilename}
                                                                   className="flex items-center justify-center p-2 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors"
-                                                                  title="Baixar"
+                                                                  title={`Baixar: ${docFilename}`}
                                                               >
                                                                   <Download className="w-4 h-4" />
                                                               </a>
                                                           </div>
-                                                      )}
+                                                          );
+                                                      })()}
                                                   </div>
                                               )}
                                               
-                                              {msg.body && (
+                                              {msg.body && msg.type !== 'document' && (
                                                   <div className="text-sm text-gray-800 break-words markdown-body whatsapp-md">
                                                       <ReactMarkdown>{formatWaMarkdown(msg.body)}</ReactMarkdown>
                                                   </div>
@@ -1041,6 +1050,24 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                           handleSendMessage(e);
                                       }
                                   }}
+                                  onPaste={e => {
+                                      const items = e.clipboardData?.items;
+                                      if (!items) return;
+                                      for (const item of Array.from(items)) {
+                                          if (item.type.startsWith('image/')) {
+                                              const file = item.getAsFile();
+                                              if (file) {
+                                                  e.preventDefault();
+                                                  // Renomeia para algo legível, ex: print_2024-01-01_14-30-00.png
+                                                  const now = new Date();
+                                                  const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                                                  const renamedFile = new File([file], `print_${timestamp}.png`, { type: file.type });
+                                                  setSelectedMedia(renamedFile);
+                                              }
+                                              break;
+                                          }
+                                      }
+                                  }}
                                   placeholder="Digite uma mensagem..."
                                   className="flex-1 max-h-32 min-h-[44px] py-3 outline-none resize-none bg-transparent"
                                   rows={1}
@@ -1086,4 +1113,3 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 };
 
 export default Dashboard;
-
