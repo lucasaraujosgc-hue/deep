@@ -51,7 +51,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [activeChat, setActiveChat] = useState<any | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
-  const [selectedMedia, setSelectedMedia] = useState<File | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<File[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [sendingMsg, setSendingMsg] = useState(false);
   const [transcribingMap, setTranscribingMap] = useState<Record<string, boolean>>({});
@@ -453,33 +453,56 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   // handleSendMessage corrigido com optimistic update
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!newMessageText.trim() && !selectedMedia) || !activeChat || sendingMsg) return;
+    if ((!newMessageText.trim() && selectedMedia.length === 0) || !activeChat || sendingMsg) return;
 
     const textToSend = newMessageText;
-    const mediaToSend = selectedMedia;
+    const mediaToSend = [...selectedMedia];
 
     setSendingMsg(true);
     setNewMessageText('');
-    setSelectedMedia(null);
+    setSelectedMedia([]);
 
-    const optimisticMsg = {
-      id: { _serialized: `optimistic_${Date.now()}`, id: `optimistic_${Date.now()}` },
-      body: textToSend,
+    // Optimistic: uma bolha por arquivo + uma pelo texto (se houver)
+    const optimisticMsgs = mediaToSend.map((file, i) => ({
+      id: { _serialized: `optimistic_${Date.now()}_${i}`, id: `optimistic_${Date.now()}_${i}` },
+      body: i === 0 ? textToSend : '',
       timestamp: Math.floor(Date.now() / 1000),
       fromMe: true,
-      type: mediaToSend ? (mediaToSend.type.startsWith('image') ? 'image' : 'document') : 'chat',
-      hasMedia: !!mediaToSend,
+      type: file.type.startsWith('image') ? 'image' : 'document',
+      hasMedia: true,
       _optimistic: true
-    };
-    setChatMessages(prev => [...prev, optimisticMsg]);
+    }));
+    if (mediaToSend.length === 0 && textToSend.trim()) {
+      optimisticMsgs.push({
+        id: { _serialized: `optimistic_${Date.now()}`, id: `optimistic_${Date.now()}` },
+        body: textToSend,
+        timestamp: Math.floor(Date.now() / 1000),
+        fromMe: true,
+        type: 'chat',
+        hasMedia: false,
+        _optimistic: true
+      });
+    }
+    setChatMessages(prev => [...prev, ...optimisticMsgs]);
     setTimeout(scrollToBottom, 50);
 
     try {
-      await api.sendWhatsAppChat({
-        chatId: activeChat.id._serialized,
-        message: textToSend,
-        media: mediaToSend || undefined
-      });
+      if (mediaToSend.length > 0) {
+        // Envia cada arquivo; o texto vai junto no primeiro
+        for (let i = 0; i < mediaToSend.length; i++) {
+          await api.sendWhatsAppChat({
+            chatId: activeChat.id._serialized,
+            message: i === 0 ? textToSend : '',
+            media: mediaToSend[i]
+          });
+        }
+      } else {
+        await api.sendWhatsAppChat({
+          chatId: activeChat.id._serialized,
+          message: textToSend,
+          media: undefined
+        });
+      }
     } catch (e) {
       setChatMessages(prev => prev.filter(m => !m._optimistic));
       setNewMessageText(textToSend);
@@ -1030,15 +1053,28 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 
                   <form onSubmit={handleSendMessage} className="p-3 bg-slate-100 border-t flex items-end gap-2">
                       <div className="flex-1 bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm flex flex-col">
-                          {selectedMedia && (
-                              <div className="bg-gray-50 p-2 border-b text-xs flex justify-between items-center text-gray-600">
-                                  <span className="truncate max-w-[200px]">{selectedMedia.name}</span>
-                                  <button type="button" onClick={() => setSelectedMedia(null)} className="text-red-500 hover:bg-red-50 p-1 rounded"><X className="w-3 h-3"/></button>
+                          {selectedMedia.length > 0 && (
+                              <div className="bg-gray-50 p-2 border-b flex flex-wrap gap-1">
+                                  {selectedMedia.map((file, i) => (
+                                      <div key={i} className="flex items-center gap-1 bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 max-w-[180px]">
+                                          <span className="truncate">{file.name}</span>
+                                          <button
+                                              type="button"
+                                              onClick={() => setSelectedMedia(prev => prev.filter((_, j) => j !== i))}
+                                              className="text-red-400 hover:text-red-600 shrink-0 ml-1"
+                                          ><X className="w-3 h-3"/></button>
+                                      </div>
+                                  ))}
                               </div>
                           )}
                           <div className="flex items-end">
                               <label className="p-3 text-gray-400 hover:text-gray-600 cursor-pointer">
-                                  <input type="file" className="hidden" accept="image/*, application/pdf, audio/*" onChange={e => e.target.files && setSelectedMedia(e.target.files[0])} />
+                                  <input type="file" className="hidden" accept="image/*, application/pdf, audio/*" multiple onChange={e => {
+                                      if (e.target.files) {
+                                          setSelectedMedia(prev => [...prev, ...Array.from(e.target.files!)]);
+                                          e.target.value = ''; // permite selecionar os mesmos arquivos de novo
+                                      }
+                                  }} />
                                   <Paperclip className="w-5 h-5"/>
                               </label>
                               <textarea 
@@ -1062,7 +1098,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                                   const now = new Date();
                                                   const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
                                                   const renamedFile = new File([file], `print_${timestamp}.png`, { type: file.type });
-                                                  setSelectedMedia(renamedFile);
+                                                  setSelectedMedia(prev => [...prev, renamedFile]);
                                               }
                                               break;
                                           }
@@ -1076,7 +1112,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                       </div>
                       <button 
                           type="submit"
-                          disabled={sendingMsg || (!newMessageText.trim() && !selectedMedia)}
+                          disabled={sendingMsg || (!newMessageText.trim() && selectedMedia.length === 0)}
                           className="w-11 h-11 bg-green-500 text-white rounded-full flex items-center justify-center hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shrink-0"
                       >
                           {sendingMsg ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-1"/>}
