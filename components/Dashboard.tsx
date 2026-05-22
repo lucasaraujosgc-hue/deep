@@ -63,6 +63,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [syncStatus, setSyncStatus] = useState<Record<string, { synced: boolean; lastSync: number | null; messageCount: number }>>({});
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
 
@@ -811,7 +813,25 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       {/* Chat UI Modal */}
       {activeChat && (
           <div className="fixed inset-0 z-50 bg-black/50 flex flex-col md:flex-row justify-end">
-              <div className="bg-white w-full md:w-[600px] h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
+              <div
+                className="bg-white w-full md:w-[600px] h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-300 relative"
+                onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false); }}
+                onDrop={e => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const files = Array.from(e.dataTransfer.files);
+                  if (files.length > 0) setSelectedMedia(prev => [...prev, ...files]);
+                }}
+              >
+              {isDragging && (
+                <div className="absolute inset-0 z-50 bg-blue-500/20 border-4 border-dashed border-blue-400 rounded flex items-center justify-center pointer-events-none">
+                  <div className="bg-white rounded-xl px-8 py-6 shadow-lg flex flex-col items-center gap-2">
+                    <Paperclip className="w-10 h-10 text-blue-500" />
+                    <p className="text-blue-600 font-semibold text-lg">Solte para anexar</p>
+                  </div>
+                </div>
+              )}
                   <div className="bg-slate-100 p-4 border-b flex items-center justify-between">
                       <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600 overflow-hidden">
@@ -1052,6 +1072,20 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                   </div>
 
                   <form onSubmit={handleSendMessage} className="p-3 bg-slate-100 border-t flex items-end gap-2">
+                      {/* Input de arquivo fora do fluxo do form para evitar submit indevido */}
+                      <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="hidden"
+                          accept="image/*,application/pdf,audio/*,video/*"
+                          multiple
+                          onChange={e => {
+                              if (e.target.files && e.target.files.length > 0) {
+                                  setSelectedMedia(prev => [...prev, ...Array.from(e.target.files!)]);
+                              }
+                              e.target.value = '';
+                          }}
+                      />
                       <div className="flex-1 bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm flex flex-col">
                           {selectedMedia.length > 0 && (
                               <div className="bg-gray-50 p-2 border-b flex flex-wrap gap-1">
@@ -1068,15 +1102,14 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                               </div>
                           )}
                           <div className="flex items-end">
-                              <label className="p-3 text-gray-400 hover:text-gray-600 cursor-pointer">
-                                  <input type="file" className="hidden" accept="image/*, application/pdf, audio/*" multiple onChange={e => {
-                                      if (e.target.files) {
-                                          setSelectedMedia(prev => [...prev, ...Array.from(e.target.files!)]);
-                                          e.target.value = ''; // permite selecionar os mesmos arquivos de novo
-                                      }
-                                  }} />
+                              <button
+                                  type="button"
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="p-3 text-gray-400 hover:text-gray-600 cursor-pointer"
+                                  title="Anexar arquivo"
+                              >
                                   <Paperclip className="w-5 h-5"/>
-                              </label>
+                              </button>
                               <textarea 
                                   value={newMessageText}
                                   onChange={e => setNewMessageText(e.target.value)}
