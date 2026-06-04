@@ -1081,9 +1081,12 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           multiple
                           onChange={e => {
                               if (e.target.files && e.target.files.length > 0) {
-                                  setSelectedMedia(prev => [...prev, ...Array.from(e.target.files!)]);
+                                  const files = Array.from(e.target.files);
+                                  e.target.value = '';
+                                  setSelectedMedia(prev => [...prev, ...files]);
+                              } else {
+                                  e.target.value = '';
                               }
-                              e.target.value = '';
                           }}
                       />
                       <div className="flex-1 bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm flex flex-col">
