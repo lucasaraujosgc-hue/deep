@@ -347,6 +347,72 @@ const saveToImapSentFolder = async (mailOptions) => {
     }
 };
 
+// --- IMPORTANTE: Helper Global para Integração com Google Calendar ---
+const getGoogleAccessToken = async () => {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
+        throw new Error("Credenciais do Google Calendar ausentes no .env");
+    }
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            client_id: process.env.GOOGLE_CLIENT_ID,
+            client_secret: process.env.GOOGLE_CLIENT_SECRET,
+            refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+            grant_type: 'refresh_token'
+        })
+    });
+    const data = await response.json();
+    if (!data.access_token) throw new Error("Falha ao obter access token: " + (data.error_description || data.error || JSON.stringify(data)));
+    return data.access_token;
+};
+
+const sendGoogleCalendarInvite = async (title, description, datetimeStr) => {
+    try {
+        const start = new Date(datetimeStr);
+        const isInvalidTime = isNaN(start.getTime());
+        const finalStart = isInvalidTime ? new Date() : start;
+        const end = new Date(finalStart.getTime() + 60 * 60 * 1000); 
+
+        const token = await getGoogleAccessToken();
+
+        const event = {
+            summary: title,
+            description: description || '',
+            start: { dateTime: finalStart.toISOString(), timeZone: 'America/Sao_Paulo' },
+            end: { dateTime: end.toISOString(), timeZone: 'America/Sao_Paulo' },
+            reminders: {
+                useDefault: false,
+                overrides: [
+                    { method: 'popup', minutes: 10 }
+                ]
+            }
+        };
+
+        const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(event)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            log(`[Calendar] Evento criado no Google Calendar: ${title}`);
+            return true;
+        } else {
+            log(`[Calendar] Erro retornado pela API do Google: ${JSON.stringify(data)}`);
+            return false;
+        }
+    } catch (e) {
+        log(`[Calendar] Erro ao integrar com Google Calendar: ${e.message}`);
+        return false;
+    }
+};
+
 // --- AI LOGIC: Tools & Handler ---
 
 // ============================================================
@@ -588,7 +654,11 @@ const executeTool = async (name, args, db, username) => {
             const result = db.prepare(
                 `INSERT INTO tasks (title, description, status, priority, color, recurrence, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)`
             ).run(args.title, args.description || '', 'pendente', args.priority || 'media', '#45B7D1', 'nenhuma', today);
-            return `Tarefa criada (ID ${result.lastInsertRowid}).`;
+            
+            // Integração Google Calendar - envia invite logo na criação
+            sendGoogleCalendarInvite(`Tarefa: ${args.title}`, args.description || '', today + "T09:00:00");
+            
+            return `Tarefa criada (ID ${result.lastInsertRowid}) e enviada para o seu Google Calendar.`;
         } catch (err) {
             return "Erro: " + err.message;
         }
@@ -597,10 +667,14 @@ const executeTool = async (name, args, db, username) => {
     // 4. Lembrete Pessoal
     if (name === "set_personal_reminder") {
         try {
+            // Em vez de enviar pelo WhatsApp no futuro, envia o arquivo ICS para integrar ao Google Calendar
+            sendGoogleCalendarInvite("Lembrete Pessoal", args.message, args.datetime);
+            
             db.prepare(
-                `INSERT INTO scheduled_messages (title, message, nextRun, recurrence, active, type, channels, targetType, createdBy) VALUES (?, ?, ?, ?, 1, 'message', ?, 'personal', ?)`
-            ).run("Lembrete Pessoal", args.message, args.datetime, args.recurrence || 'unico', JSON.stringify({whatsapp: true, email: false}), username);
-            return `Lembrete agendado para ${args.datetime}. O sistema enviará automaticamente.`;
+                `INSERT INTO scheduled_messages (title, message, nextRun, recurrence, active, type, channels, targetType, createdBy) VALUES (?, ?, ?, ?, 0, 'message', ?, 'personal', ?)`
+            ).run("Lembrete Pessoal (Google Calendar)", args.message, args.datetime, args.recurrence || 'unico', JSON.stringify({whatsapp: false, email: false}), username);
+            
+            return `Lembrete agendado para ${args.datetime} e integrado ao seu Google Calendar via e-mail. Não será enviado por WhatsApp.`;
         } catch (err) {
             return "Erro ao agendar lembrete: " + err.message;
         }
@@ -1745,6 +1819,11 @@ app.post('/api/tasks', (req, res) => {
         } else {
             const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
                 .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt);
+            
+            // Integração Google Calendar na criacao via interface
+            let dateStr = t.dueDate ? `${t.dueDate}T09:00:00` : new Date().toISOString();
+            sendGoogleCalendarInvite(`Tarefa: ${t.title}`, t.description, dateStr);
+
             res.json({ success: true, id: result.lastInsertRowid });
         }
     } catch (err) {
@@ -1813,8 +1892,15 @@ app.post('/api/scheduled', (req, res) => {
                 .run(title, message, nextRun, recurrence, active ? 1 : 0, type, channelsStr, targetType, companyIdsStr, attachmentFilename, attachmentOriginalName, documentsPayload, id);
             res.json({success: true, id});
         } else {
+            // Integração Google Calendar - Desliga envio WhatsApp e manda pro Calendar se for "personal"
+            let finalActive = active ? 1 : 0;
+            if (targetType === 'personal') {
+                finalActive = 0; // Desativa cron job nativo para lembrete pessoal
+                sendGoogleCalendarInvite(`Lembrete Pessoal: ${title}`, message, nextRun);
+            }
+
             const result = db.prepare(`INSERT INTO scheduled_messages (title, message, nextRun, recurrence, active, type, channels, targetType, selectedCompanyIds, attachmentFilename, attachmentOriginalName, documentsPayload, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(title, message, nextRun, recurrence, active ? 1 : 0, type, channelsStr, targetType, companyIdsStr, attachmentFilename, attachmentOriginalName, documentsPayload, req.user);
+                .run(title, message, nextRun, recurrence, finalActive, type, channelsStr, targetType, companyIdsStr, attachmentFilename, attachmentOriginalName, documentsPayload, req.user);
             res.json({success: true, id: result.lastInsertRowid});
         }
     } catch (err) {
