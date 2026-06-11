@@ -369,7 +369,15 @@ const getGoogleAccessToken = async () => {
 
 const sendGoogleCalendarInvite = async (title, description, datetimeStr) => {
     try {
-        const start = new Date(datetimeStr);
+        let dt = datetimeStr;
+        // Se a data vier no formato ISO mas sem timezone info, assumimos America/Sao_Paulo (-03:00)
+        // do contrario, 'new Date()' no container GCF (que está UTC) interpreta como UTC
+        const isISO = dt.includes('T');
+        if (isISO && !dt.includes('Z') && !dt.includes('-0') && !dt.includes('-1') && !dt.includes('+')) {
+            dt = dt + "-03:00"; 
+        }
+
+        const start = new Date(dt);
         const isInvalidTime = isNaN(start.getTime());
         const finalStart = isInvalidTime ? new Date() : start;
         const end = new Date(finalStart.getTime() + 60 * 60 * 1000); 
@@ -379,8 +387,8 @@ const sendGoogleCalendarInvite = async (title, description, datetimeStr) => {
         const event = {
             summary: title,
             description: description || '',
-            start: { dateTime: finalStart.toISOString(), timeZone: 'America/Sao_Paulo' },
-            end: { dateTime: end.toISOString(), timeZone: 'America/Sao_Paulo' },
+            start: { dateTime: finalStart.toISOString() },
+            end: { dateTime: end.toISOString() },
             reminders: {
                 useDefault: false,
                 overrides: [
@@ -443,28 +451,29 @@ const assistantTools = [
     },
     {
         name: "add_task",
-        description: "Cria uma nova tarefa.",
+        description: "Cria uma nova tarefa ou lembrete. Use como padrão para tarefas, pedidos e lembretes a menos que o usuário EXPLICITAMENTE peça um EVENTO no Google Calendar.",
         parameters: {
             type: Type.OBJECT,
             properties: {
-                title: { type: Type.STRING, description: "Título da tarefa" },
-                description: { type: Type.STRING },
-                priority: { type: Type.STRING, enum: ["alta", "media", "baixa"] }
+                title: { type: Type.STRING, description: "Título breve da tarefa ou lembrete" },
+                description: { type: Type.STRING, description: "Detalhes do que deve ser feito" },
+                priority: { type: Type.STRING, enum: ["alta", "media", "baixa"] },
+                color: { type: Type.STRING, description: "Cor em HEX (ex #FF0000). Escolha cores variadas e harmoniosas baseadas no contexto." }
             },
             required: ["title"]
         }
     },
     {
-        name: "set_personal_reminder",
-        description: "Define um lembrete pessoal para o usuário. Use para 'me lembre de X em Y minutos/horas' ou 'todo dia X'. IMPORTANTE: Calcule o datetime ISO 8601 correto somando o tempo relativo à hora atual fornecida no system prompt.",
+        name: "create_calendar_event",
+        description: "Cria um EVENTO no Google Calendar. USE APENAS QUANDO FOR EXPLICITAMENTE DESCRITO COMO UM EVENTO NA AGENDA.",
         parameters: {
             type: Type.OBJECT,
             properties: {
-                message: { type: Type.STRING, description: "O que deve ser lembrado." },
-                datetime: { type: Type.STRING, description: "Data e hora exata ISO 8601 (ex: 2026-05-10T14:30:00). Calcule baseando-se na hora atual informada no system prompt." },
-                recurrence: { type: Type.STRING, enum: ["unico", "diaria", "semanal", "mensal", "anual"], description: "Padrão: unico." }
+                title: { type: Type.STRING, description: "Título descritivo do evento." },
+                description: { type: Type.STRING, description: "Detalhes adicionais do evento." },
+                datetime: { type: Type.STRING, description: "Data e hora exata ISO 8601 (ex: 2026-05-10T14:30:00). Calcule baseando-se na hora atual informada no system prompt." }
             },
-            required: ["message", "datetime"]
+            required: ["title", "datetime"]
         }
     },
     {
@@ -650,33 +659,25 @@ const executeTool = async (name, args, db, username) => {
     // 3. Adicionar Tarefa
     if (name === "add_task") {
         const today = new Date().toISOString().split('T')[0];
+        const color = args.color || '#45B7D1';
         try {
             const result = db.prepare(
                 `INSERT INTO tasks (title, description, status, priority, color, recurrence, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)`
-            ).run(args.title, args.description || '', 'pendente', args.priority || 'media', '#45B7D1', 'nenhuma', today);
+            ).run(args.title, args.description || '', 'pendente', args.priority || 'media', color, 'nenhuma', today);
             
-            // Integração Google Calendar - envia invite logo na criação
-            sendGoogleCalendarInvite(`Tarefa: ${args.title}`, args.description || '', today + "T09:00:00");
-            
-            return `Tarefa criada (ID ${result.lastInsertRowid}) e enviada para o seu Google Calendar.`;
+            return `Tarefa ou Lembrete criado com sucesso no sistema interno (ID ${result.lastInsertRowid}).`;
         } catch (err) {
             return "Erro: " + err.message;
         }
     }
 
-    // 4. Lembrete Pessoal
-    if (name === "set_personal_reminder") {
+    // 4. Lembrete Pessoal (Substituído por Evento no Google Calendar)
+    if (name === "create_calendar_event") {
         try {
-            // Em vez de enviar pelo WhatsApp no futuro, envia o arquivo ICS para integrar ao Google Calendar
-            sendGoogleCalendarInvite("Lembrete Pessoal", args.message, args.datetime);
-            
-            db.prepare(
-                `INSERT INTO scheduled_messages (title, message, nextRun, recurrence, active, type, channels, targetType, createdBy) VALUES (?, ?, ?, ?, 0, 'message', ?, 'personal', ?)`
-            ).run("Lembrete Pessoal (Google Calendar)", args.message, args.datetime, args.recurrence || 'unico', JSON.stringify({whatsapp: false, email: false}), username);
-            
-            return `Lembrete agendado para ${args.datetime} e integrado ao seu Google Calendar via e-mail. Não será enviado por WhatsApp.`;
+            sendGoogleCalendarInvite(args.title, args.description, args.datetime);
+            return `Evento '${args.title}' agendado para ${args.datetime} e integrado ao seu Google Calendar com sucesso.`;
         } catch (err) {
-            return "Erro ao agendar lembrete: " + err.message;
+            return "Erro ao criar evento na agenda: " + err.message;
         }
     }
 
@@ -1819,10 +1820,6 @@ app.post('/api/tasks', (req, res) => {
         } else {
             const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
                 .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt);
-            
-            // Integração Google Calendar na criacao via interface
-            let dateStr = t.dueDate ? `${t.dueDate}T09:00:00` : new Date().toISOString();
-            sendGoogleCalendarInvite(`Tarefa: ${t.title}`, t.description, dateStr);
 
             res.json({ success: true, id: result.lastInsertRowid });
         }
@@ -1892,15 +1889,8 @@ app.post('/api/scheduled', (req, res) => {
                 .run(title, message, nextRun, recurrence, active ? 1 : 0, type, channelsStr, targetType, companyIdsStr, attachmentFilename, attachmentOriginalName, documentsPayload, id);
             res.json({success: true, id});
         } else {
-            // Integração Google Calendar - Desliga envio WhatsApp e manda pro Calendar se for "personal"
-            let finalActive = active ? 1 : 0;
-            if (targetType === 'personal') {
-                finalActive = 0; // Desativa cron job nativo para lembrete pessoal
-                sendGoogleCalendarInvite(`Lembrete Pessoal: ${title}`, message, nextRun);
-            }
-
             const result = db.prepare(`INSERT INTO scheduled_messages (title, message, nextRun, recurrence, active, type, channels, targetType, selectedCompanyIds, attachmentFilename, attachmentOriginalName, documentsPayload, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(title, message, nextRun, recurrence, finalActive, type, channelsStr, targetType, companyIdsStr, attachmentFilename, attachmentOriginalName, documentsPayload, req.user);
+                .run(title, message, nextRun, recurrence, active ? 1 : 0, type, channelsStr, targetType, companyIdsStr, attachmentFilename, attachmentOriginalName, documentsPayload, req.user);
             res.json({success: true, id: result.lastInsertRowid});
         }
     } catch (err) {
