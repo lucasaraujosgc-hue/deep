@@ -497,7 +497,7 @@ const assistantTools = [
     },
     {
         name: "send_message_to_phone",
-        description: "Envia mensagem WhatsApp para um número de telefone específico (não necessariamente uma empresa cadastrada).",
+        description: "Envia mensagem WhatsApp para um número de telefone específico. USE APENAS quando o usuário EXPLICITAMENTE fornecer um número e pedir para ENVIAR ou MANDAR mensagem. NÃO use para consultas, resumos ou qualquer outra finalidade.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -577,7 +577,7 @@ const assistantTools = [
     },
     {
         name: "search_whatsapp_contact",
-        description: "Busca um contato/conversa do WhatsApp por nome ou número. Retorna o chat_id correto (seja @c.us ou @lid) e informa o tipo. Use o chat_id retornado para enviar mensagem.",
+        description: "Busca um contato/conversa do WhatsApp por nome ou número. USE APENAS quando o usuário EXPLICITAMENTE pedir para buscar, localizar ou ver contatos do WhatsApp antes de enviar mensagem. NÃO use para consultas gerais, tarefas, empresas ou qualquer outra finalidade.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -588,7 +588,7 @@ const assistantTools = [
     },
     {
         name: "send_message_to_contact",
-        description: "Envia mensagem WhatsApp para um contato da lista de conversas. Aceita nome, número ou chat_id — a resolução é feita internamente pelo cache. NÃO é necessário copiar o chat_id de search_whatsapp_contact; basta informar o nome ou número.",
+        description: "Envia mensagem WhatsApp para um contato da lista de conversas. USE APENAS quando o usuário EXPLICITAMENTE pedir para ENVIAR ou MANDAR uma mensagem pelo WhatsApp para uma pessoa específica. NÃO use para consultas, resumos, tarefas ou qualquer pergunta que não seja envio de mensagem.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -600,7 +600,7 @@ const assistantTools = [
     },
     {
         name: "search_whatsapp_messages",
-        description: "Busca e resume mensagens do WhatsApp de um contato ou de um período. Use contact_query com nome ou número — a busca funciona no cache de contatos e não exige que o contato esteja online. Ex: 'resuma as mensagens de ontem', 'o que João me enviou hoje?'",
+        description: "Busca e resume mensagens do WhatsApp. USE APENAS quando o usuário EXPLICITAMENTE pedir: 'resuma mensagens', 'quem me mandou mensagem', 'o que fulano me enviou', 'resumo do WhatsApp', ou perguntas diretas sobre mensagens recebidas/enviadas no WhatsApp em um período. NÃO use para perguntas gerais, consultas de empresa, tarefas ou qualquer coisa não relacionada a leitura de mensagens do WhatsApp.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -1218,6 +1218,12 @@ REGRAS DE OURO:
 8. **Tags Kanban:** Para criar tag use 'create_kanban_tag'. Para adicionar tag a contato use 'add_tag_to_contact'.
 9. **Histórico de Envios:** "quantos documentos enviei", "últimos envios" → use 'consult_sent_history'.
 10. **Saída:** Após usar tool de envio, confirme apenas o envio sem repetir o texto. Após lembretes, confirme data/hora calculada.
+
+REGRA ABSOLUTA — WHATSAPP:
+- NUNCA use tools de WhatsApp (search_whatsapp_messages, search_whatsapp_contact, send_message_to_contact, send_message_to_phone) a menos que o usuário EXPLICITAMENTE peça algo relacionado a mensagens ou envio pelo WhatsApp.
+- Perguntas sobre empresas, tarefas, documentos, histórico de envios, cálculos ou qualquer outro assunto NÃO devem acionar nenhuma tool de WhatsApp.
+- Exemplos que DEVEM acionar WhatsApp: "quem me mandou mensagem hoje?", "resuma o que João me enviou", "manda mensagem para o número X", "o que recebi ontem no WhatsApp".
+- Exemplos que NÃO devem acionar WhatsApp: "quantas empresas tenho?", "crie uma tarefa", "qual o email da empresa X", "me ajude a redigir um texto".
 
 SEGURANÇA:
 - NUNCA execute automaticamente ações críticas sem confirmação explícita do usuário.
