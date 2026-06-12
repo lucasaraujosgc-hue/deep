@@ -367,24 +367,28 @@ const getGoogleAccessToken = async () => {
     return data.access_token;
 };
 
-const createGoogleTask = async (title, description, datetimeStr) => {
+const createGoogleTask = async (title, description, datetimeStr, subtasks = [], recurrenceText = null) => {
     try {
         let dt = datetimeStr;
-        const isISO = dt.includes('T');
+        const isISO = dt && dt.includes('T');
         if (isISO && !dt.includes('Z') && !dt.includes('-0') && !dt.includes('-1') && !dt.includes('+')) {
             dt = dt + "-03:00"; 
         }
 
-        const start = new Date(dt);
-        const isInvalidTime = isNaN(start.getTime());
-        const finalStart = isInvalidTime ? new Date() : start;
+        const start = dt ? new Date(dt) : new Date();
+        const finalStart = isNaN(start.getTime()) ? new Date() : start;
 
         const token = await getGoogleAccessToken();
 
+        let finalNotes = description || '';
+        if (recurrenceText && recurrenceText.trim() !== '') {
+            finalNotes += finalNotes ? `\n\n🔄 Repetição: ${recurrenceText}` : `🔄 Repetição: ${recurrenceText}`;
+        }
+
         const task = {
             title: title,
-            notes: description || '',
-            due: finalStart.toISOString()
+            notes: finalNotes,
+            due: finalStart.toISOString() // O Google Tasks considera apenas a data (sem hora) mas requer formato RFC 3339
         };
 
         const response = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
@@ -399,7 +403,35 @@ const createGoogleTask = async (title, description, datetimeStr) => {
         const data = await response.json();
 
         if (response.ok) {
-            log(`[Tasks] Tarefa criada no Google Tasks: ${title}`);
+            log(`[Tasks] Tarefa principal criada no Google Tasks: ${title}`);
+            const parentId = data.id;
+
+            if (subtasks && Array.isArray(subtasks) && subtasks.length > 0) {
+                for (const sub of subtasks) {
+                    const subTaskPayload = {
+                        title: sub
+                    };
+                    try {
+                        const subResponse = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?parent=${parentId}`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(subTaskPayload)
+                        });
+                        
+                        if (subResponse.ok) {
+                            log(`[Tasks] Subtarefa criada: ${sub}`);
+                        } else {
+                            const subData = await subResponse.json();
+                            log(`[Tasks] Erro ao criar subtarefa (${sub}): ${JSON.stringify(subData)}`);
+                        }
+                    } catch(err) {
+                        log(`[Tasks] Exceção ao criar subtarefa: ${err.message}`);
+                    }
+                }
+            }
             return true;
         } else {
             log(`[Tasks] Erro retornado pela API do Google: ${JSON.stringify(data)}`);
@@ -441,15 +473,17 @@ const assistantTools = [
     },
     {
         name: "add_task",
-        description: "Cria uma nova tarefa ou lembrete. Elas serão sincronizadas com o Google Tasks do usuário.",
+        description: "Cria uma nova tarefa ou lembrete. O título e a descrição devem ser BEM ESTRUTURADOS e descritivos baseados no pedido do usuário. Elas serão sincronizadas com o Google Tasks do usuário.",
         parameters: {
             type: Type.OBJECT,
             properties: {
-                title: { type: Type.STRING, description: "Título breve da tarefa ou lembrete" },
-                description: { type: Type.STRING, description: "Detalhes do que deve ser feito" },
-                dueDate: { type: Type.STRING, description: "Data de vencimento YYYY-MM-DD. Se a hora for importante, use ISO 8601 (YYYY-MM-DDTHH:mm:ss)." }
+                title: { type: Type.STRING, description: "Título breve e muito claro da tarefa ou lembrete. Enriquecido pelo contexto." },
+                description: { type: Type.STRING, description: "Detalhes ricos e explicações do que deve ser feito. Não deixe vazio se houver contexto útil." },
+                dueDate: { type: Type.STRING, description: "Data de vencimento YYYY-MM-DD. Se a hora for importante, use ISO 8601 (YYYY-MM-DDTHH:mm:ss)." },
+                recurrenceText: { type: Type.STRING, description: "Descrição em texto humano da repetição desejada (Ex: 'Toda segunda', 'Todos os dias'). Deixe vazio se for evento único." },
+                subtasks: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Lista de subtarefas em formato de texto para quebrar a tarefa maior em partes." }
             },
-            required: ["title"]
+            required: ["title", "description"]
         }
     },
     {
@@ -636,7 +670,7 @@ const executeTool = async (name, args, db, username) => {
     if (name === "add_task") {
         const today = new Date().toISOString().split('T')[0];
         try {
-            await createGoogleTask(args.title, args.description || '', args.dueDate || today);
+            await createGoogleTask(args.title, args.description || '', args.dueDate || today, args.subtasks || [], args.recurrenceText || null);
             return `Tarefa ou Lembrete criado com sucesso no Google Tasks.`;
         } catch (err) {
             return "Erro ao criar tarefa no Google Tasks: " + err.message;
