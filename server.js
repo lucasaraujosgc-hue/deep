@@ -347,10 +347,10 @@ const saveToImapSentFolder = async (mailOptions) => {
     }
 };
 
-// --- IMPORTANTE: Helper Global para Integração com Google Calendar ---
+// --- IMPORTANTE: Helper Global para Integração com Google Tasks ---
 const getGoogleAccessToken = async () => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
-        throw new Error("Credenciais do Google Calendar ausentes no .env");
+        throw new Error("Credenciais do Google ausentes no .env");
     }
     const response = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -367,11 +367,9 @@ const getGoogleAccessToken = async () => {
     return data.access_token;
 };
 
-const sendGoogleCalendarInvite = async (title, description, datetimeStr) => {
+const createGoogleTask = async (title, description, datetimeStr) => {
     try {
         let dt = datetimeStr;
-        // Se a data vier no formato ISO mas sem timezone info, assumimos America/Sao_Paulo (-03:00)
-        // do contrario, 'new Date()' no container GCF (que está UTC) interpreta como UTC
         const isISO = dt.includes('T');
         if (isISO && !dt.includes('Z') && !dt.includes('-0') && !dt.includes('-1') && !dt.includes('+')) {
             dt = dt + "-03:00"; 
@@ -380,43 +378,35 @@ const sendGoogleCalendarInvite = async (title, description, datetimeStr) => {
         const start = new Date(dt);
         const isInvalidTime = isNaN(start.getTime());
         const finalStart = isInvalidTime ? new Date() : start;
-        const end = new Date(finalStart.getTime() + 60 * 60 * 1000); 
 
         const token = await getGoogleAccessToken();
 
-        const event = {
-            summary: title,
-            description: description || '',
-            start: { dateTime: finalStart.toISOString() },
-            end: { dateTime: end.toISOString() },
-            reminders: {
-                useDefault: false,
-                overrides: [
-                    { method: 'popup', minutes: 10 }
-                ]
-            }
+        const task = {
+            title: title,
+            notes: description || '',
+            due: finalStart.toISOString()
         };
 
-        const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        const response = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(event)
+            body: JSON.stringify(task)
         });
 
         const data = await response.json();
 
         if (response.ok) {
-            log(`[Calendar] Evento criado no Google Calendar: ${title}`);
+            log(`[Tasks] Tarefa criada no Google Tasks: ${title}`);
             return true;
         } else {
-            log(`[Calendar] Erro retornado pela API do Google: ${JSON.stringify(data)}`);
+            log(`[Tasks] Erro retornado pela API do Google: ${JSON.stringify(data)}`);
             return false;
         }
     } catch (e) {
-        log(`[Calendar] Erro ao integrar com Google Calendar: ${e.message}`);
+        log(`[Tasks] Erro ao integrar com Google Tasks: ${e.message}`);
         return false;
     }
 };
@@ -451,29 +441,15 @@ const assistantTools = [
     },
     {
         name: "add_task",
-        description: "Cria uma nova tarefa ou lembrete. Use como padrão para tarefas, pedidos e lembretes a menos que o usuário EXPLICITAMENTE peça um EVENTO no Google Calendar.",
+        description: "Cria uma nova tarefa ou lembrete. Elas serão sincronizadas com o Google Tasks do usuário.",
         parameters: {
             type: Type.OBJECT,
             properties: {
                 title: { type: Type.STRING, description: "Título breve da tarefa ou lembrete" },
                 description: { type: Type.STRING, description: "Detalhes do que deve ser feito" },
-                priority: { type: Type.STRING, enum: ["alta", "media", "baixa"] },
-                color: { type: Type.STRING, description: "Cor em HEX (ex #FF0000). Escolha cores variadas e harmoniosas baseadas no contexto." }
+                dueDate: { type: Type.STRING, description: "Data de vencimento YYYY-MM-DD. Se a hora for importante, use ISO 8601 (YYYY-MM-DDTHH:mm:ss)." }
             },
             required: ["title"]
-        }
-    },
-    {
-        name: "create_calendar_event",
-        description: "Cria um EVENTO no Google Calendar. USE APENAS QUANDO FOR EXPLICITAMENTE DESCRITO COMO UM EVENTO NA AGENDA.",
-        parameters: {
-            type: Type.OBJECT,
-            properties: {
-                title: { type: Type.STRING, description: "Título descritivo do evento." },
-                description: { type: Type.STRING, description: "Detalhes adicionais do evento." },
-                datetime: { type: Type.STRING, description: "Data e hora exata ISO 8601 (ex: 2026-05-10T14:30:00). Calcule baseando-se na hora atual informada no system prompt." }
-            },
-            required: ["title", "datetime"]
         }
     },
     {
@@ -659,25 +635,11 @@ const executeTool = async (name, args, db, username) => {
     // 3. Adicionar Tarefa
     if (name === "add_task") {
         const today = new Date().toISOString().split('T')[0];
-        const color = args.color || '#45B7D1';
         try {
-            const result = db.prepare(
-                `INSERT INTO tasks (title, description, status, priority, color, recurrence, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)`
-            ).run(args.title, args.description || '', 'pendente', args.priority || 'media', color, 'nenhuma', today);
-            
-            return `Tarefa ou Lembrete criado com sucesso no sistema interno (ID ${result.lastInsertRowid}).`;
+            await createGoogleTask(args.title, args.description || '', args.dueDate || today);
+            return `Tarefa ou Lembrete criado com sucesso no Google Tasks.`;
         } catch (err) {
-            return "Erro: " + err.message;
-        }
-    }
-
-    // 4. Lembrete Pessoal (Substituído por Evento no Google Calendar)
-    if (name === "create_calendar_event") {
-        try {
-            sendGoogleCalendarInvite(args.title, args.description, args.datetime);
-            return `Evento '${args.title}' agendado para ${args.datetime} e integrado ao seu Google Calendar com sucesso.`;
-        } catch (err) {
-            return "Erro ao criar evento na agenda: " + err.message;
+            return "Erro ao criar tarefa no Google Tasks: " + err.message;
         }
     }
 
