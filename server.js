@@ -479,11 +479,11 @@ const assistantTools = [
             properties: {
                 title: { type: Type.STRING, description: "Título breve e muito claro da tarefa ou lembrete. Enriquecido pelo contexto." },
                 description: { type: Type.STRING, description: "Detalhes ricos e explicações do que deve ser feito. Não deixe vazio se houver contexto útil." },
-                dueDate: { type: Type.STRING, description: "Data de vencimento YYYY-MM-DD. Se a hora for importante, use ISO 8601 (YYYY-MM-DDTHH:mm:ss)." },
+                dueDates: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Para tarefas repetidas, gere MÚLTIPLAS datas de vencimento YYYY-MM-DD (ex: os próximos 6 a 12 meses das datas correspondentes). Para tarefa única, apenas uma data. IMPORTANTE: Use apenas este campo para data." },
                 recurrenceText: { type: Type.STRING, description: "Descrição em texto humano da repetição desejada (Ex: 'Toda segunda', 'Todos os dias'). Deixe vazio se for evento único." },
                 subtasks: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Lista de subtarefas em formato de texto para quebrar a tarefa maior em partes." }
             },
-            required: ["title", "description"]
+            required: ["title", "description", "dueDates"]
         }
     },
     {
@@ -670,8 +670,11 @@ const executeTool = async (name, args, db, username) => {
     if (name === "add_task") {
         const today = new Date().toISOString().split('T')[0];
         try {
-            await createGoogleTask(args.title, args.description || '', args.dueDate || today, args.subtasks || [], args.recurrenceText || null);
-            return `Tarefa ou Lembrete criado com sucesso no Google Tasks.`;
+            const datesToCreate = (args.dueDates && args.dueDates.length > 0) ? args.dueDates : [today];
+            for (const dt of datesToCreate) {
+                await createGoogleTask(args.title, args.description || '', dt, args.subtasks || [], args.recurrenceText || null);
+            }
+            return `Tarefa(s) ou Lembrete(s) criado(s) com sucesso no Google Tasks. (Total: ${datesToCreate.length} tarefas/datas criadas)`;
         } catch (err) {
             return "Erro ao criar tarefa no Google Tasks: " + err.message;
         }
