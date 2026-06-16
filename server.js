@@ -443,6 +443,61 @@ const createGoogleTask = async (title, description, datetimeStr, subtasks = [], 
     }
 };
 
+const createGoogleCalendarEvent = async (title, description, datetimeStr, recurrence = []) => {
+    try {
+        let dt = datetimeStr;
+        const isISO = dt && dt.includes('T');
+        if (isISO && !dt.includes('Z') && !dt.includes('-0') && !dt.includes('-1') && !dt.includes('+')) {
+            dt = dt + "-03:00"; 
+        }
+
+        const start = new Date(dt);
+        const finalStart = isNaN(start.getTime()) ? new Date() : start;
+        const end = new Date(finalStart.getTime() + 60 * 60 * 1000); // 1 hora de evento padrão
+
+        const token = await getGoogleAccessToken();
+
+        const event = {
+            summary: title,
+            description: description || '',
+            start: { dateTime: finalStart.toISOString() },
+            end: { dateTime: end.toISOString() },
+            reminders: {
+                useDefault: false,
+                overrides: [
+                    { method: 'popup', minutes: 10 }
+                ]
+            }
+        };
+
+        if (recurrence && recurrence.length > 0) {
+            event.recurrence = recurrence;
+        }
+
+        const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(event)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            log(`[Calendar] Evento criado no Google Calendar: ${title}`);
+            return true;
+        } else {
+            log(`[Calendar] Erro retornado pela API do Google: ${JSON.stringify(data)}`);
+            return false;
+        }
+    } catch (e) {
+        log(`[Calendar] Erro ao integrar com Google Calendar: ${e.message}`);
+        return false;
+    }
+};
+
 // --- AI LOGIC: Tools & Handler ---
 
 // ============================================================
@@ -473,7 +528,7 @@ const assistantTools = [
     },
     {
         name: "add_task",
-        description: "Cria uma nova tarefa ou lembrete. O título e a descrição devem ser BEM ESTRUTURADOS e descritivos baseados no pedido do usuário. Elas serão sincronizadas com o Google Tasks do usuário.",
+        description: "Cria uma nova tarefa. O título e a descrição devem ser BEM ESTRUTURADOS e descritivos baseados no pedido do usuário. Elas serão sincronizadas com o Google Tasks do usuário. Use este para pedidos de 'tarefa'.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -484,6 +539,20 @@ const assistantTools = [
                 subtasks: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Lista de subtarefas em formato de texto para quebrar a tarefa maior em partes." }
             },
             required: ["title", "description", "dueDates"]
+        }
+    },
+    {
+        name: "create_calendar_event",
+        description: "Cria um lembrete ou evento na agenda. O evento será sincronizado com o Google Calendar do usuário. Use para 'lembretes' e 'eventos na agenda'.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING, description: "Título breve e direto do lembrete ou evento." },
+                description: { type: Type.STRING, description: "Detalhes sobre o evento ou lembrete." },
+                datetime: { type: Type.STRING, description: "Data e hora exata de início em formato ISO 8601 (ex: 2026-05-10T14:30:00). IMPORTANTE: Calcule somando ao tempo atual fornecido." },
+                recurrence: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Regra de repetição (Opcional, formato RRULE, ex: 'RRULE:FREQ=DAILY'). Caso seja evento único, deixe vazio." }
+            },
+            required: ["title", "datetime"]
         }
     },
     {
@@ -674,9 +743,19 @@ const executeTool = async (name, args, db, username) => {
             for (const dt of datesToCreate) {
                 await createGoogleTask(args.title, args.description || '', dt, args.subtasks || [], args.recurrenceText || null);
             }
-            return `Tarefa(s) ou Lembrete(s) criado(s) com sucesso no Google Tasks. (Total: ${datesToCreate.length} tarefas/datas criadas)`;
+            return `Tarefa(s) criado(s) com sucesso no Google Tasks. (Total: ${datesToCreate.length} tarefas/datas criadas)`;
         } catch (err) {
             return "Erro ao criar tarefa no Google Tasks: " + err.message;
+        }
+    }
+
+    // 4. Lembrete Pessoal (Google Calendar)
+    if (name === "create_calendar_event") {
+        try {
+            await createGoogleCalendarEvent(args.title, args.description || '', args.datetime, args.recurrence || []);
+            return `Evento/Lembrete '${args.title}' agendado para ${args.datetime} e integrado ao seu Google Calendar com sucesso.`;
+        } catch (err) {
+            return "Erro ao criar evento na agenda: " + err.message;
         }
     }
 
