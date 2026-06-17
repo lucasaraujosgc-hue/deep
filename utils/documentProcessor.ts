@@ -2,11 +2,6 @@
 import { Company } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
-type PdfTextItem = {
-  str?: string;
-  transform?: number[];
-};
-
 // Configuração segura e isolada do Worker
 const setupPdfWorker = () => {
     try {
@@ -17,53 +12,6 @@ const setupPdfWorker = () => {
     } catch (e) {
         console.error("Erro ao configurar Worker do PDF.js:", e);
     }
-};
-
-const buildPageText = (items: PdfTextItem[]): string => {
-  const positionedItems = items
-    .map((item, order) => {
-      const transform = Array.isArray(item.transform) ? item.transform : [];
-      return {
-        text: (item.str || '').trim(),
-        x: typeof transform[4] === 'number' ? transform[4] : 0,
-        y: typeof transform[5] === 'number' ? transform[5] : 0,
-        order,
-      };
-    })
-    .filter(item => item.text.length > 0);
-
-  if (positionedItems.length === 0) return '';
-
-  const yTolerance = 2;
-  const lines: Array<{ y: number; order: number; items: typeof positionedItems }> = [];
-
-  for (const item of positionedItems) {
-    let line = lines.find(existing => Math.abs(existing.y - item.y) <= yTolerance);
-
-    if (!line) {
-      line = { y: item.y, order: item.order, items: [] };
-      lines.push(line);
-    }
-
-    line.items.push(item);
-    line.order = Math.min(line.order, item.order);
-  }
-
-  return lines
-    .sort((a, b) => {
-      const yDiff = b.y - a.y;
-      return Math.abs(yDiff) > yTolerance ? yDiff : a.order - b.order;
-    })
-    .map(line =>
-      line.items
-        .sort((a, b) => a.x - b.x || a.order - b.order)
-        .map(item => item.text)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    )
-    .filter(Boolean)
-    .join('\n');
 };
 
 /**
@@ -117,12 +65,16 @@ export const extractTextFromPDF = async (file: File): Promise<string> => {
 
     const pdf = await loadingTask.promise;
     let fullText = '';
+    const maxPages = Math.min(pdf.numPages, 5); // Lê no máximo 5 páginas para performance
 
-    for (let i = 1; i <= pdf.numPages; i++) {
+    for (let i = 1; i <= maxPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      const pageText = buildPageText(textContent.items as PdfTextItem[]);
-      fullText += pageText + '\n';
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ')
+        .trim();
+      fullText += pageText + ' ';
     }
 
     return fullText.trim(); 

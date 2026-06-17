@@ -14,7 +14,6 @@ import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { ImapFlow } from 'imapflow';
 import { GoogleGenAI, Type } from "@google/genai";
-import pendenciesRouter from './routes/pendencies.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1810,7 +1809,6 @@ app.post('/api/login', (req, res) => {
 });
 
 app.use('/api', authenticateToken);
-app.use('/api/pendencies', pendenciesRouter(getDb, authenticateToken, ai));
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo' });

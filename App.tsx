@@ -13,7 +13,6 @@ import Send from './components/Send';
 import Login from './components/Login';
 import AiFab from './components/AiFab';
 import FileGallery from './components/FileGallery';
-import Pendencies from './components/Pendencies';
 import { DEFAULT_USER_SETTINGS, MOCK_DOCUMENTS } from './constants';
 import { UserSettings, Document, UploadedFile } from './types';
 import { api } from './services/api';
@@ -192,8 +191,6 @@ const App: React.FC = () => {
         return <Settings settings={userSettings} onSave={setUserSettings} />;
       case 'gallery':
         return <FileGallery />;
-      case 'pendencies':
-        return <Pendencies />;
       default:
         return (
           <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400">

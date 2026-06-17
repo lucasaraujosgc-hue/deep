@@ -54,7 +54,6 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isOpen, se
     { id: 'bulksend', label: 'Envio em Massa', icon: Mails },
     { id: 'scheduled', label: 'Agendamentos', icon: CalendarClock },
     { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
-    { id: 'pendencies', label: 'Pendências', icon: FileText },
     { id: 'gallery', label: 'Galeria de Arquivos', icon: FolderOpen },
     { id: 'settings', label: 'Usuário', icon: UserCog },
   ];

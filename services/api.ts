@@ -252,20 +252,5 @@ export const api = {
   deleteScheduledMessage: async (id: number): Promise<void> => {
       const res = await fetch(`${API_URL}/scheduled/${id}`, { method: 'DELETE', headers: getAuthHeader() });
       return handleResponse(res);
-  },
-
-  // Pendencies
-  getPendencies: async (): Promise<any[]> => {
-      const res = await fetch(`${API_URL}/pendencies`, { headers: getAuthHeader() });
-      return handleResponse(res);
-  },
-
-  extractPendencies: async (companyId: number, pdfText: string): Promise<any> => {
-      const res = await fetch(`${API_URL}/pendencies/extract`, {
-          method: 'POST',
-          headers: getHeaders(),
-          body: JSON.stringify({ companyId, pdfText })
-      });
-      return handleResponse(res);
   }
 };
