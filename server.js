@@ -14,6 +14,7 @@ import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { ImapFlow } from 'imapflow';
 import { GoogleGenAI, Type } from "@google/genai";
+import pendenciesRouter from './routes/pendencies.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -443,7 +444,7 @@ const createGoogleTask = async (title, description, datetimeStr, subtasks = [], 
     }
 };
 
-const createGoogleCalendarEvent = async (title, description, datetimeStr, recurrence = []) => {
+const createGoogleCalendarEvent = async (title, description, datetimeStr, recurrence = [], endDatetimeStr = null) => {
     try {
         let dt = datetimeStr;
         const isISO = dt && dt.includes('T');
@@ -453,15 +454,26 @@ const createGoogleCalendarEvent = async (title, description, datetimeStr, recurr
 
         const start = new Date(dt);
         const finalStart = isNaN(start.getTime()) ? new Date() : start;
-        const end = new Date(finalStart.getTime() + 60 * 60 * 1000); // 1 hora de evento padrão
+        
+        let end;
+        if (endDatetimeStr) {
+            let dtEnd = endDatetimeStr;
+            if (dtEnd && dtEnd.includes('T') && !dtEnd.includes('Z') && !dtEnd.includes('-0') && !dtEnd.includes('-1') && !dtEnd.includes('+')) {
+                dtEnd = dtEnd + "-03:00";
+            }
+            end = new Date(dtEnd);
+            if (isNaN(end.getTime())) end = new Date(finalStart.getTime() + 60 * 60 * 1000);
+        } else {
+            end = new Date(finalStart.getTime() + 60 * 60 * 1000); // 1 hora de evento padrão
+        }
 
         const token = await getGoogleAccessToken();
 
         const event = {
             summary: title,
             description: description || '',
-            start: { dateTime: finalStart.toISOString() },
-            end: { dateTime: end.toISOString() },
+            start: { dateTime: finalStart.toISOString(), timeZone: "America/Sao_Paulo" },
+            end: { dateTime: end.toISOString(), timeZone: "America/Sao_Paulo" },
             reminders: {
                 useDefault: false,
                 overrides: [
@@ -470,8 +482,9 @@ const createGoogleCalendarEvent = async (title, description, datetimeStr, recurr
             }
         };
 
-        if (recurrence && recurrence.length > 0) {
-            event.recurrence = recurrence;
+        if (recurrence && Array.isArray(recurrence) && recurrence.length > 0) {
+            // Guarantee RRULE format
+            event.recurrence = recurrence.map(r => r.startsWith('RRULE:') ? r : `RRULE:${r}`);
         }
 
         const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
@@ -543,14 +556,15 @@ const assistantTools = [
     },
     {
         name: "create_calendar_event",
-        description: "Cria um lembrete ou evento na agenda. O evento será sincronizado com o Google Calendar do usuário. Use para 'lembretes' e 'eventos na agenda'.",
+        description: "Cria um lembrete ou evento na agenda. O evento será sincronizado com o Google Calendar do usuário. Use para 'lembretes' e 'eventos na agenda'. Se o usuário informar múltiplos horários distintos (ex: 8-12 e 13-17), você DEVE chamar esta tool múltiplas vezes, uma para cada bloco de horário.",
         parameters: {
             type: Type.OBJECT,
             properties: {
                 title: { type: Type.STRING, description: "Título breve e direto do lembrete ou evento." },
                 description: { type: Type.STRING, description: "Detalhes sobre o evento ou lembrete." },
-                datetime: { type: Type.STRING, description: "Data e hora exata de início em formato ISO 8601 (ex: 2026-05-10T14:30:00). IMPORTANTE: Calcule somando ao tempo atual fornecido." },
-                recurrence: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Regra de repetição (Opcional, formato RRULE, ex: 'RRULE:FREQ=DAILY'). Caso seja evento único, deixe vazio." }
+                datetime: { type: Type.STRING, description: "Data e hora exata de INÍCIO em formato ISO 8601 (ex: 2026-05-10T14:30:00)." },
+                endDatetime: { type: Type.STRING, description: "Data e hora exata de TÉRMINO em formato ISO 8601 (ex: 2026-05-10T17:00:00). Importante informar para definir corretamente a duração na agenda." },
+                recurrence: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Regras de repetição no formato RRULE do iCalendar (ex: 'FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=MO,WE,FR'). O prefixo 'RRULE:' será adicionado automaticamente. Se for evento único, deixe vazio." }
             },
             required: ["title", "datetime"]
         }
@@ -752,8 +766,8 @@ const executeTool = async (name, args, db, username) => {
     // 4. Lembrete Pessoal (Google Calendar)
     if (name === "create_calendar_event") {
         try {
-            await createGoogleCalendarEvent(args.title, args.description || '', args.datetime, args.recurrence || []);
-            return `Evento/Lembrete '${args.title}' agendado para ${args.datetime} e integrado ao seu Google Calendar com sucesso.`;
+            await createGoogleCalendarEvent(args.title, args.description || '', args.datetime, args.recurrence || [], args.endDatetime || null);
+            return `Evento/Lembrete '${args.title}' agendado para ${args.datetime} ${args.endDatetime ? 'até ' + args.endDatetime : ''} e integrado ao seu Google Calendar com sucesso.`;
         } catch (err) {
             return "Erro ao criar evento na agenda: " + err.message;
         }
@@ -1796,6 +1810,7 @@ app.post('/api/login', (req, res) => {
 });
 
 app.use('/api', authenticateToken);
+app.use('/api/pendencies', pendenciesRouter(getDb, authenticateToken, ai));
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo' });
