@@ -1,6 +1,6 @@
 import express from 'express';
 
-export default function pendenciesRouter(getDb, authenticateToken, ai) {
+export default function pendenciesRouter(getDb, authenticateToken) {
     const router = express.Router();
 
     const ensureTable = (db) => {
@@ -16,25 +16,253 @@ export default function pendenciesRouter(getDb, authenticateToken, ai) {
         `);
     };
 
-    // Obter empresas com pendências (todas empresas que têm pendenciesList salvo, ou podemos listar todas as empresas e fazer left join)
+    /**
+     * Extrai todas as pendências de um Relatório de Situação Fiscal da Receita Federal.
+     *
+     * Estratégia genérica:
+     *  1. Localiza TODOS os blocos que começam com "Pendência - <nome>" no texto.
+     *  2. Para cada bloco, escolhe automaticamente um parser baseado no conteúdo:
+     *     - Bloco com linhas de período (ex: "2025 - JAN SET NOV DEZ") → parser de omissão
+     *     - Bloco com linhas de débito numérico (código receita + datas + valores) → parser de débito SIEF
+     *     - Bloco com inscrições PGFN (ex: "50.4.XX...") → parser de inscrição SIDA
+     *     - Qualquer outro bloco desconhecido → captura o conteúdo bruto como texto
+     *
+     * Assim o sistema funciona para qualquer tipo de pendência presente no relatório,
+     * incluindo futuras variações, sem precisar conhecer o nome do bloco antecipadamente.
+     *
+     * @param {string} text - Texto extraído do PDF
+     * @returns {string[]} Lista de strings descrevendo cada pendência encontrada
+     */
+    function extractPendencies(text) {
+        const pendencies = [];
+
+        // Divide o texto em linhas limpas
+        const lines = text
+            .split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l.length > 0);
+
+        // ── Localiza os índices de todos os blocos "Pendência - ..." ──────────
+        // Também marca os "Diagnóstico Fiscal" como separadores de seção,
+        // para não vazar conteúdo entre seções da Receita e da PGFN.
+        const blockStarts = []; // { index, title }
+        const sectionDividers = []; // índices de separadores
+
+        for (let i = 0; i < lines.length; i++) {
+            if (/^Pend[eê]ncia\s*[-–]/i.test(lines[i])) {
+                // Extrai o nome limpo: remove asteriscos e underscores decorativos
+                const title = lines[i]
+                    .replace(/[_*]+/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                blockStarts.push({ index: i, title });
+            }
+            if (/Diagn[oó]stico Fiscal/i.test(lines[i])) {
+                sectionDividers.push(i);
+            }
+        }
+
+        if (blockStarts.length === 0) return pendencies;
+
+        // ── Para cada bloco, delimita até o próximo bloco ou fim ──────────────
+        for (let b = 0; b < blockStarts.length; b++) {
+            const start = blockStarts[b].index + 1;
+            const end = b + 1 < blockStarts.length
+                ? blockStarts[b + 1].index
+                : lines.length;
+
+            const blockTitle = blockStarts[b].title;
+            const blockLines = lines.slice(start, end).filter(l => {
+                // Remove cabeçalhos de página, rodapés e separadores decorativos
+                if (/Minist[eé]rio da Fazenda/i.test(l)) return false;
+                if (/Secretaria Especial/i.test(l)) return false;
+                if (/Procuradoria-Geral/i.test(l)) return false;
+                if (/Informa[cç][oõ]es de Apoio/i.test(l)) return false;
+                if (/P[aá]gina:\s*\d+/i.test(l)) return false;
+                if (/^CNPJ:\s*[\d./-]/.test(l)) return false;
+                if (/^_{5,}/.test(l)) return false;
+                if (/Diagn[oó]stico Fiscal/i.test(l)) return false;
+                if (/Final do Relat[oó]rio/i.test(l)) return false;
+                if (/Por meio do Portal/i.test(l)) return false;
+                if (/CNPJ do certificado/i.test(l)) return false;
+                return true;
+            });
+
+            if (blockLines.length === 0) continue;
+
+            // ── Escolhe o parser pelo conteúdo do bloco ─────────────────────
+            const blockText = blockLines.join('\n');
+
+            if (isOmissaoBlock(blockLines)) {
+                parseOmissao(blockTitle, blockLines, pendencies);
+            } else if (isDebitoBlock(blockLines)) {
+                parseDebito(blockTitle, blockLines, pendencies);
+            } else if (isInscricaoBlock(blockLines)) {
+                parseInscricao(blockTitle, blockLines, pendencies);
+            } else {
+                // Parser genérico: captura o conteúdo bruto ignorando linhas de cabeçalho de tabela
+                parseGenerico(blockTitle, blockLines, pendencies);
+            }
+        }
+
+        return pendencies;
+    }
+
+    // ── Detecção de tipo de bloco ─────────────────────────────────────────────
+
+    // Bloco de omissão: contém linhas de período "AAAA - MES MES MES"
+    function isOmissaoBlock(lines) {
+        return lines.some(l => /^\d{4}\s*[-–]\s*[A-Z]{3}/.test(l));
+    }
+
+    // Bloco de débito SIEF: contém linhas com código de receita + data + valores monetários
+    // Ex: "5440-01 - MAED - DCTFWEB   19/11/2024  10/01/2025  250,00  250,00  0,00  47,47  297,47  DEVEDOR"
+    // Ex: "1082-01 - CP-SEGUR.  02/2025  20/03/2025  775,19  775,19  ..."
+    function isDebitoBlock(lines) {
+        return lines.some(l =>
+            /^\d{4}-\d{2}\s*[-–]/.test(l) &&
+            /\d{2}\/\d{4}|\d{2}\/\d{2}\/\d{4}/.test(l) &&
+            /[\d.,]{4,}\s+[\d.,]{4,}/.test(l)
+        );
+    }
+
+    // Bloco de inscrição PGFN: contém linhas com nº de inscrição "50.4.XX.XXXXXX-XX"
+    function isInscricaoBlock(lines) {
+        return lines.some(l => /^50\.\d+\.\d+\.\d+-\d+/.test(l));
+    }
+
+    // ── Parsers especializados ────────────────────────────────────────────────
+
+    /**
+     * Parser de Omissão (ex: DCTFWeb, DCTF, DIRPF, ECF, etc.)
+     * Captura todas as linhas de período e gera uma única entrada descritiva.
+     */
+    function parseOmissao(title, lines, out) {
+        const periodLines = lines.filter(l => /^\d{4}\s*[-–]\s*[A-Z]{3}/.test(l));
+        if (periodLines.length > 0) {
+            out.push(`${title} — Períodos sem entrega: ${periodLines.join(' | ')}`);
+        }
+        // Captura notas explicativas (linhas começando com *)
+        const notes = lines.filter(l => /^\*[^*]/.test(l));
+        if (notes.length > 0) {
+            out.push(`${title} — Observação: ${notes.join(' ')}`);
+        }
+    }
+
+    /**
+     * Parser de Débito SIEF (tabela de débitos com valores monetários).
+     * Cada linha de débito vira uma pendência separada com todos os campos.
+     *
+     * Padrão real do documento (espaçamento variável):
+     *   5440-01 - MAED - DCTFWEB   19/11/2024  10/01/2025  250,00  250,00  0,00  47,47  297,47  DEVEDOR
+     *   1082-01 - CP-SEGUR.          02/2025   20/03/2025   775,19  775,19  155,03  132,09  1.062,31  DEVEDOR
+     *   1082-21 - CP-SEGUR.            2025    19/12/2025   349,57  349,57  69,91   22,82   442,30    DEVEDOR
+     */
+    function parseDebito(title, lines, out) {
+        // Regex flexível:
+        // Grupo 1: código receita (ex: "5440-01 - MAED - DCTFWEB" ou "1082-01 - CP-SEGUR.")
+        // Grupo 2: PA/Exerc (mm/aaaa, aaaa, ou data completa)
+        // Grupo 3: data de vencimento dd/mm/aaaa
+        // Grupos 4-8: valores numéricos (Vl.Original, Sdo.Devedor, Multa, Juros, Sdo.Dev.Cons.)
+        // Grupo 9: situação (DEVEDOR...)
+        const re = /^(\d{4}-\d{2}\s*[-–].+?)\s{2,}(\d{2}\/\d{4}|\d{4}|\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+(\S+)/;
+
+        for (const l of lines) {
+            const m = l.match(re);
+            if (m) {
+                const [, receita, paExerc, dtVcto, vlOriginal, sdoDevedor, multa, juros, sdoDevCons, situacao] = m;
+                out.push(
+                    `${title} — Receita: ${receita.trim()} | PA/Exerc.: ${paExerc} | ` +
+                    `Vencimento: ${dtVcto} | Valor Original: R$ ${vlOriginal} | ` +
+                    `Saldo Devedor: R$ ${sdoDevedor} | Multa: R$ ${multa} | ` +
+                    `Juros: R$ ${juros} | Saldo Consolidado: R$ ${sdoDevCons} | ` +
+                    `Situação: ${situacao}`
+                );
+            }
+        }
+    }
+
+    /**
+     * Parser de Inscrição PGFN/SIDA.
+     * Cada inscrição pode ocupar 2-3 linhas (nome da receita continua na linha seguinte,
+     * e a situação fica numa terceira linha).
+     *
+     * Padrão real:
+     *   50.4.23.112646-22   1507-SIMPLES       26/06/2023   12376.759.846/2023-75   DEVEDOR PRINCIPAL
+     *                       NACIONAL
+     *             Situação: ATIVA AJUIZADA
+     */
+    function parseInscricao(title, lines, out) {
+        const inscricaoRe = /^(50\.\d+\.\d+\.\d+-\d+)\s+([\d]{4}[-\s]\S+)\s+(\d{2}\/\d{2}\/\d{4})\s*(?:(\d{2}\/\d{2}\/\d{4})\s+)?([\d.\/\-]+)\s+(DEVEDOR\s+\S+)/i;
+
+        let i = 0;
+        while (i < lines.length) {
+            const m = lines[i].match(inscricaoRe);
+            if (m) {
+                const [, inscricao, receitaInicio, inscritoEm, ajuizadoEm, processo, tipoDevedor] = m;
+
+                // Verifica se linha seguinte é continuação do nome da receita
+                let receita = receitaInicio.trim();
+                let j = i + 1;
+                if (j < lines.length && !/^50\./.test(lines[j]) && !/Situa[cç][aã]o:/i.test(lines[j]) && !/^\d{4}/.test(lines[j])) {
+                    receita += ' ' + lines[j].trim();
+                    j++;
+                }
+
+                // Captura linha de Situação
+                let situacao = '';
+                if (j < lines.length && /Situa[cç][aã]o:/i.test(lines[j])) {
+                    situacao = lines[j].replace(/Situa[cç][aã]o:\s*/i, '').trim();
+                    j++;
+                }
+
+                out.push(
+                    `${title} — Nº Inscrição: ${inscricao} | Receita: ${receita} | ` +
+                    `Inscrito em: ${inscritoEm}` +
+                    `${ajuizadoEm ? ` | Ajuizado em: ${ajuizadoEm}` : ''} | ` +
+                    `Processo: ${processo} | Tipo: ${tipoDevedor}` +
+                    `${situacao ? ` | Situação: ${situacao}` : ''}`
+                );
+                i = j;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    /**
+     * Parser genérico para blocos desconhecidos.
+     * Ignora linhas de cabeçalho de tabela e captura o conteúdo útil como texto.
+     */
+    function parseGenerico(title, lines, out) {
+        // Ignora linhas que parecem ser cabeçalho de tabela (só letras maiúsculas e espaços)
+        const contentLines = lines.filter(l =>
+            !/^[A-ZÁÉÍÓÚ\s\/\.]+$/.test(l) &&
+            l.length > 5
+        );
+        if (contentLines.length > 0) {
+            out.push(`${title} — ${contentLines.join(' | ')}`);
+        }
+    }
+
+    // ── Rotas ─────────────────────────────────────────────────────────────────
+
     router.get('/', authenticateToken, (req, res) => {
         const db = getDb(req.user);
         if (!db) return res.status(500).json({ error: 'Database error' });
         ensureTable(db);
         try {
-            // Buscamos todas as empresas, e fazemos join com as pendências
             const rows = db.prepare(`
                 SELECT c.id, c.name, c.docNumber, p.pendenciesList, p.lastUpdate 
                 FROM companies c
                 LEFT JOIN pendencies p ON c.id = p.companyId
                 ORDER BY c.name ASC
             `).all();
-            
-            // Formatamos pendenciesList (está como string JSON) -> array
+
             const formatted = rows.map(r => {
                 let list = [];
                 if (r.pendenciesList) {
-                    try { list = JSON.parse(r.pendenciesList); } catch(e) {}
+                    try { list = JSON.parse(r.pendenciesList); } catch (e) {}
                 }
                 return {
                     id: r.id,
@@ -52,7 +280,6 @@ export default function pendenciesRouter(getDb, authenticateToken, ai) {
         }
     });
 
-    // Rota que faz o RAG da extração de texto
     router.post('/extract', authenticateToken, async (req, res) => {
         const db = getDb(req.user);
         if (!db) return res.status(500).json({ error: 'Database error' });
@@ -64,43 +291,9 @@ export default function pendenciesRouter(getDb, authenticateToken, ai) {
         }
 
         try {
-            let extractedList = [];
-
-            if (ai) {
-                // Passar para a IA estruturar
-                const prompt = `
-Você é um assistente de extração contábil. A seguir está o texto extraído de um Relatório de Pendências da Receita Federal.
-Por favor, identifique e extraia a lista exata de "pendências" descritas no documento. 
-Cuidado para não incluir textos genéricos. Retorne APENAS um JSON Array de strings contendo cada uma das pendências identificadas.
-Se não houver nenhuma, retorne [].
-Lembre-se: NÃO retorne formatação markdown, retorne a lista diretamente na estrutura JSON.
-
-TEXTO DO RELATÓRIO:
-${pdfText}
-`;
-                const result = await ai.models.generateContent({
-                    model: 'gemini-3-flash-preview',
-                    contents: prompt,
-                    config: {
-                        responseMimeType: "application/json"
-                    }
-                });
-                
-                try {
-                    const txt = result.text.trim();
-                    extractedList = JSON.parse(txt);
-                    if (!Array.isArray(extractedList)) extractedList = [txt];
-                } catch (e) {
-                    // se falhar tenta fazer fall-back
-                    extractedList = ["Não foi possível formatar as pendências. Análise bruta falhou."];
-                }
-            } else {
-                extractedList = ["IA Indisponível - Salva apenas como registro."];
-            }
-
+            const extractedList = extractPendencies(pdfText);
             const now = new Date().toISOString();
-            
-            // Salvar no BD
+
             db.prepare(`
                 INSERT INTO pendencies (companyId, pdfText, pendenciesList, status, lastUpdate)
                 VALUES (?, ?, ?, 'pending', ?)
@@ -112,7 +305,7 @@ ${pdfText}
 
             res.json({ success: true, pendencies: extractedList });
         } catch (err) {
-            console.error("Erro ai extrair", err);
+            console.error("Erro ao extrair pendências", err);
             res.status(500).json({ error: err.message });
         }
     });
