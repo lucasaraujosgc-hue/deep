@@ -16,6 +16,38 @@ export default function pendenciesRouter(getDb, authenticateToken) {
         `);
     };
 
+    const MONTH_PATTERN = '(?:JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)';
+    const PERIOD_RE = new RegExp(`(\\d{4}\\s*[-–]\\s*${MONTH_PATTERN}(?:\\s+${MONTH_PATTERN})*)`, 'i');
+
+    function normalizeExtractedPdfText(text) {
+        if (!text) return '';
+
+        let normalized = String(text)
+            .replace(/\r\n?/g, '\n')
+            .replace(/\u00a0/g, ' ');
+
+        const meaningfulLines = normalized
+            .split('\n')
+            .filter(line => line.trim().length > 0).length;
+
+        if (meaningfulLines <= 3 && /Pend[eê]ncia\s*[-–]/i.test(normalized)) {
+            normalized = normalized
+                .replace(/\s+_{5,}\s+/g, '\n')
+                .replace(/\s+(Diagn[oó]stico Fiscal)/gi, '\n$1')
+                .replace(/\s+(Pend[eê]ncia\s*[-–])/gi, '\n$1')
+                .replace(/\s+(\(Per[ií]odo de Apura[cç][aã]o\))/gi, '\n$1')
+                .replace(new RegExp(`\\s+(\\d{4}\\s*[-–]\\s*${MONTH_PATTERN}\\b)`, 'gi'), '\n$1')
+                .replace(/\s+(\*[^*])/g, '\n$1')
+                .replace(/\s+(\d{4}-\d{2}\s*[-–])/g, '\n$1')
+                .replace(/\s+(Notifica[cç][aã]o de lan[cç]amento:)/gi, '\n$1')
+                .replace(/\s+(50\.\d+\.\d+\.\d+-\d+)/g, '\n$1')
+                .replace(/\s+(Situa[cç][aã]o:)/gi, '\n$1')
+                .replace(/\s+(Final do Relat[oó]rio)/gi, '\n$1');
+        }
+
+        return normalized;
+    }
+
     /**
      * Extrai todas as pendências de um Relatório de Situação Fiscal da Receita Federal.
      *
@@ -37,7 +69,7 @@ export default function pendenciesRouter(getDb, authenticateToken) {
         const pendencies = [];
 
         // Divide o texto em linhas limpas
-        const lines = text
+        const lines = normalizeExtractedPdfText(text)
             .split(/\r?\n/)
             .map(l => l.trim())
             .filter(l => l.length > 0);
@@ -112,7 +144,7 @@ export default function pendenciesRouter(getDb, authenticateToken) {
 
     // Bloco de omissão: contém linhas de período "AAAA - MES MES MES"
     function isOmissaoBlock(lines) {
-        return lines.some(l => /^\d{4}\s*[-–]\s*[A-Z]{3}/.test(l));
+        return lines.some(l => PERIOD_RE.test(l));
     }
 
     // Bloco de débito SIEF: contém linhas com código de receita + data + valores monetários
@@ -138,7 +170,10 @@ export default function pendenciesRouter(getDb, authenticateToken) {
      * Captura todas as linhas de período e gera uma única entrada descritiva.
      */
     function parseOmissao(title, lines, out) {
-        const periodLines = lines.filter(l => /^\d{4}\s*[-–]\s*[A-Z]{3}/.test(l));
+        const periodLines = lines
+            .map(l => l.match(PERIOD_RE)?.[1]?.toUpperCase())
+            .filter(Boolean);
+
         if (periodLines.length > 0) {
             out.push(`${title} — Períodos sem entrega: ${periodLines.join(' | ')}`);
         }
@@ -165,7 +200,7 @@ export default function pendenciesRouter(getDb, authenticateToken) {
         // Grupo 3: data de vencimento dd/mm/aaaa
         // Grupos 4-8: valores numéricos (Vl.Original, Sdo.Devedor, Multa, Juros, Sdo.Dev.Cons.)
         // Grupo 9: situação (DEVEDOR...)
-        const re = /^(\d{4}-\d{2}\s*[-–].+?)\s{2,}(\d{2}\/\d{4}|\d{4}|\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+(\S+)/;
+        const re = /^(\d{4}-\d{2}\s*[-–].+?)\s+(\d{2}\/\d{4}|\d{4}|\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+(\S+)/;
 
         for (const l of lines) {
             const m = l.match(re);
@@ -193,28 +228,34 @@ export default function pendenciesRouter(getDb, authenticateToken) {
      *             Situação: ATIVA AJUIZADA
      */
     function parseInscricao(title, lines, out) {
-        const inscricaoRe = /^(50\.\d+\.\d+\.\d+-\d+)\s+([\d]{4}[-\s]\S+)\s+(\d{2}\/\d{2}\/\d{4})\s*(?:(\d{2}\/\d{2}\/\d{4})\s+)?([\d.\/\-]+)\s+(DEVEDOR\s+\S+)/i;
-
         let i = 0;
         while (i < lines.length) {
-            const m = lines[i].match(inscricaoRe);
+            if (!/^50\.\d+\.\d+\.\d+-\d+/.test(lines[i])) {
+                i++;
+                continue;
+            }
+
+            const recordLines = [lines[i]];
+            let j = i + 1;
+
+            while (j < lines.length && !/^50\.\d+\.\d+\.\d+-\d+/.test(lines[j])) {
+                recordLines.push(lines[j]);
+                j++;
+
+                if (/Situa[cç][aã]o:/i.test(recordLines[recordLines.length - 1])) {
+                    break;
+                }
+            }
+
+            const recordText = recordLines.join(' ').replace(/\s+/g, ' ').trim();
+            const situacaoMatch = recordText.match(/\bSitua[cç][aã]o:\s*(.+)$/i);
+            const situacao = situacaoMatch ? situacaoMatch[1].trim() : '';
+            const dataText = recordText.replace(/\s+Situa[cç][aã]o:\s*.+$/i, '').trim();
+            const m = dataText.match(/^(50\.\d+\.\d+\.\d+-\d+)\s+(.+?)\s+(\d{2}\/\d{2}\/\d{4})\s+(?:(\d{2}\/\d{2}\/\d{4})\s+)?([\d.\/\-]+)\s+(DEVEDOR\s+\S+)(?:\s+(.+))?$/i);
+
             if (m) {
-                const [, inscricao, receitaInicio, inscritoEm, ajuizadoEm, processo, tipoDevedor] = m;
-
-                // Verifica se linha seguinte é continuação do nome da receita
-                let receita = receitaInicio.trim();
-                let j = i + 1;
-                if (j < lines.length && !/^50\./.test(lines[j]) && !/Situa[cç][aã]o:/i.test(lines[j]) && !/^\d{4}/.test(lines[j])) {
-                    receita += ' ' + lines[j].trim();
-                    j++;
-                }
-
-                // Captura linha de Situação
-                let situacao = '';
-                if (j < lines.length && /Situa[cç][aã]o:/i.test(lines[j])) {
-                    situacao = lines[j].replace(/Situa[cç][aã]o:\s*/i, '').trim();
-                    j++;
-                }
+                const [, inscricao, receitaInicio, inscritoEm, ajuizadoEm, processo, tipoDevedor, receitaFinal] = m;
+                const receita = [receitaInicio, receitaFinal].filter(Boolean).join(' ').trim();
 
                 out.push(
                     `${title} — Nº Inscrição: ${inscricao} | Receita: ${receita} | ` +
@@ -223,10 +264,9 @@ export default function pendenciesRouter(getDb, authenticateToken) {
                     `Processo: ${processo} | Tipo: ${tipoDevedor}` +
                     `${situacao ? ` | Situação: ${situacao}` : ''}`
                 );
-                i = j;
-            } else {
-                i++;
             }
+
+            i = j;
         }
     }
 
