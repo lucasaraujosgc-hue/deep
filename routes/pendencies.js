@@ -68,7 +68,7 @@ export default function pendenciesRouter(getDb, authenticateToken, ai) {
 
             if (ai) {
                 // Passar para a IA estruturar
-                const prompt = \`
+                const prompt = `
 Você é um assistente de extração contábil. A seguir está o texto extraído de um Relatório de Pendências da Receita Federal.
 Por favor, identifique e extraia a lista exata de "pendências" descritas no documento. 
 Cuidado para não incluir textos genéricos. Retorne APENAS um JSON Array de strings contendo cada uma das pendências identificadas.
@@ -76,10 +76,10 @@ Se não houver nenhuma, retorne [].
 Lembre-se: NÃO retorne formatação markdown, retorne a lista diretamente na estrutura JSON.
 
 TEXTO DO RELATÓRIO:
-\${pdfText}
-\`;
+${pdfText}
+`;
                 const result = await ai.models.generateContent({
-                    model: 'gemini-3.1-pro',
+                    model: 'gemini-3-flash-preview',
                     contents: prompt,
                     config: {
                         responseMimeType: "application/json"
@@ -101,14 +101,14 @@ TEXTO DO RELATÓRIO:
             const now = new Date().toISOString();
             
             // Salvar no BD
-            db.prepare(\`
+            db.prepare(`
                 INSERT INTO pendencies (companyId, pdfText, pendenciesList, status, lastUpdate)
                 VALUES (?, ?, ?, 'pending', ?)
                 ON CONFLICT(companyId) DO UPDATE SET
                 pdfText = excluded.pdfText,
                 pendenciesList = excluded.pendenciesList,
                 lastUpdate = excluded.lastUpdate
-            \`).run(companyId, pdfText, JSON.stringify(extractedList), now);
+            `).run(companyId, pdfText, JSON.stringify(extractedList), now);
 
             res.json({ success: true, pendencies: extractedList });
         } catch (err) {
