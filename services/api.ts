@@ -38,29 +38,6 @@ const handleResponse = async (res: Response) => {
 };
 
 export const api = {
-  get: async (path: string): Promise<any> => {
-    const res = await fetch(`${API_URL}${path}`, { headers: getAuthHeader() });
-    return handleResponse(res);
-  },
-
-  post: async (path: string, body: any): Promise<any> => {
-    const res = await fetch(`${API_URL}${path}`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(body)
-    });
-    return handleResponse(res);
-  },
-
-  postRaw: async (path: string, body: FormData, isMultipart: boolean = false): Promise<any> => {
-    const res = await fetch(`${API_URL}${path}`, {
-      method: 'POST',
-      headers: getAuthHeader(),
-      body: body
-    });
-    return handleResponse(res);
-  },
-
   // Authenticationo
   login: async (user: string, pass: string): Promise<{ success: boolean; token?: string }> => {
     try {

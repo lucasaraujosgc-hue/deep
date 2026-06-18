@@ -225,8 +225,6 @@ export const getDb = (username) => {
         CREATE TABLE IF NOT EXISTS whatsapp_sync (chatId TEXT PRIMARY KEY, lastSyncTimestamp INTEGER);
         CREATE TABLE IF NOT EXISTS whatsapp_contacts (contact_id TEXT PRIMARY KEY, name TEXT, phone_number TEXT, last_seen TIMESTAMP);
         CREATE TABLE IF NOT EXISTS company_pendencies (id INTEGER PRIMARY KEY AUTOINCREMENT, companyId INTEGER, docNumber TEXT, companyName TEXT, filename TEXT, extractedData TEXT, created_at TEXT);
-        CREATE TABLE IF NOT EXISTS serpro_config (id INTEGER PRIMARY KEY CHECK (id = 1), consumer_key TEXT, consumer_secret_enc TEXT, cert_path TEXT, cert_senha_enc TEXT, cnpj_contratante TEXT, is_production INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
-        CREATE TABLE IF NOT EXISTS sitfis_consultas (id INTEGER PRIMARY KEY AUTOINCREMENT, companyId INTEGER NOT NULL, protocolo TEXT, status TEXT NOT NULL, pdf_path TEXT, erro_msg TEXT, tentativas INTEGER DEFAULT 0, created_at TEXT, concluido_at TEXT);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chatId ON whatsapp_messages(chatId);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_timestamp ON whatsapp_messages(timestamp);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_contacts_name ON whatsapp_contacts(name);
