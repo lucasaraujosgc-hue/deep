@@ -189,8 +189,8 @@ const PendenciesTab: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-800">
             Situação Fiscal
@@ -230,10 +230,10 @@ const PendenciesTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white border rounded-xl shadow-sm flex-1 flex flex-col min-h-0">
-        <div className="overflow-auto flex-1 relative">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-slate-50 border-b text-slate-600 font-medium sticky top-0 z-10 shadow-sm">
+            <thead className="bg-slate-50 border-b text-slate-600 font-medium">
               <tr>
                 <th className="px-6 py-4">Empresa</th>
                 <th
