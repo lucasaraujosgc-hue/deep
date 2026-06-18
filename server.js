@@ -54,7 +54,7 @@ log("Servidor iniciando...");
 log(`Diretório de dados: ${DATA_DIR}`);
 
 // --- AI CONFIGURATION ---
-let ai = null;
+export let ai = null;
 if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     log("AI: Google GenAI (v3 Flash Preview) inicializado.");
@@ -200,7 +200,7 @@ const upsertContactCache = (db, contactId, contactName, phoneNumber = null) => {
 // --- MULTI-TENANCY: Database Management ---
 const dbInstances = {};
 
-const getDb = (username) => {
+export const getDb = (username) => {
     if (!username) return null;
     if (dbInstances[username]) return dbInstances[username];
 
@@ -224,6 +224,7 @@ const getDb = (username) => {
         CREATE TABLE IF NOT EXISTS whatsapp_messages (id TEXT PRIMARY KEY, chatId TEXT NOT NULL, sender TEXT, timestamp INTEGER, body TEXT, fromMe INTEGER, hasMedia INTEGER, type TEXT, transcription TEXT, contactName TEXT);
         CREATE TABLE IF NOT EXISTS whatsapp_sync (chatId TEXT PRIMARY KEY, lastSyncTimestamp INTEGER);
         CREATE TABLE IF NOT EXISTS whatsapp_contacts (contact_id TEXT PRIMARY KEY, name TEXT, phone_number TEXT, last_seen TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS company_pendencies (id INTEGER PRIMARY KEY AUTOINCREMENT, companyId INTEGER, docNumber TEXT, companyName TEXT, filename TEXT, extractedData TEXT, created_at TEXT);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chatId ON whatsapp_messages(chatId);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_timestamp ON whatsapp_messages(timestamp);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_contacts_name ON whatsapp_contacts(name);
@@ -1808,6 +1809,9 @@ app.post('/api/login', (req, res) => {
     }
 });
 
+import pendenciesRouter from './api/pendencies.js';
+
+app.use('/api/pendencies', authenticateToken, pendenciesRouter);
 app.use('/api', authenticateToken);
 
 app.post('/api/upload', upload.single('file'), (req, res) => {

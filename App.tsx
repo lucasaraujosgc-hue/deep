@@ -13,6 +13,7 @@ import Send from './components/Send';
 import Login from './components/Login';
 import AiFab from './components/AiFab';
 import FileGallery from './components/FileGallery';
+import PendenciesTab from './components/PendenciesTab';
 import { DEFAULT_USER_SETTINGS, MOCK_DOCUMENTS } from './constants';
 import { UserSettings, Document, UploadedFile } from './types';
 import { api } from './services/api';
@@ -191,6 +192,8 @@ const App: React.FC = () => {
         return <Settings settings={userSettings} onSave={setUserSettings} />;
       case 'gallery':
         return <FileGallery />;
+      case 'pendencies':
+        return <PendenciesTab />;
       default:
         return (
           <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400">
@@ -215,7 +218,7 @@ const App: React.FC = () => {
         {activePage !== 'dashboard' && (
           <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-30 shrink-0">
             <h2 className="text-lg font-semibold text-gray-700 capitalize">
-              {activePage === 'bulksend' ? 'Envio em Massa' : activePage === 'settings' ? 'Usuário' : activePage === 'send' ? 'Envio' : activePage}
+              {activePage === 'bulksend' ? 'Envio em Massa' : activePage === 'settings' ? 'Usuário' : activePage === 'send' ? 'Envio' : activePage === 'pendencies' ? 'Situação Fiscal' : activePage}
             </h2>
             <div className="flex items-center gap-4">
                <div className="text-sm text-right hidden sm:block">

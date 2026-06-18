@@ -41,6 +41,7 @@ COPY package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 
 COPY server.js ./
+COPY api/ ./api/
 COPY --from=builder /app/dist ./dist
 
 RUN mkdir -p /app/data/whatsapp_auth /app/data/uploads && \

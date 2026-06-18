@@ -15,7 +15,8 @@ import {
   Mails,
   UserCog,
   LogOut,
-  FolderOpen
+  FolderOpen,
+  FileSearch
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -48,6 +49,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isOpen, se
   const menuItems = [
     { id: 'dashboard', label: 'Kanban (WhatsApp)', icon: KanbanSquare },
     { id: 'companies', label: 'Empresas', icon: Building2 },
+    { id: 'pendencies', label: 'Situação Fiscal', icon: FileSearch },
     { id: 'documents', label: 'Documentos', icon: FileText },
     { id: 'upload', label: 'Upload', icon: Upload },
     { id: 'send', label: 'Envio', icon: Send },
