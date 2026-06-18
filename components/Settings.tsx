@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { Save, User, Mail, MessageCircle, FileText, Check, LayoutTemplate, Link as LinkIcon, Plus, Trash, Clock, CalendarDays, Star, Tag, Smartphone, Send, Loader2, Building2 } from 'lucide-react';
+import { Save, User, Mail, MessageCircle, FileText, Check, LayoutTemplate, Link as LinkIcon, Plus, Trash, Clock, CalendarDays, Star, Tag, Smartphone, Send, Loader2, Building2, ShieldCheck } from 'lucide-react';
 import { UserSettings, CategoryRule } from '../types';
 import { DOCUMENT_CATEGORIES } from '../constants';
 import { api } from '../services/api';
+import { SerproSettings } from './SerproSettings';
 
 interface SettingsProps {
   settings: UserSettings;
@@ -11,7 +12,7 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
-  const [activeTab, setActiveTab] = useState<'signatures' | 'categories' | 'documents' | 'bindings' | 'due_dates' | 'daily' | 'company_categories'>('signatures');
+  const [activeTab, setActiveTab] = useState<'signatures' | 'categories' | 'documents' | 'bindings' | 'due_dates' | 'daily' | 'company_categories' | 'serpro'>('signatures');
   const [formData, setFormData] = useState<UserSettings>(settings);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -236,6 +237,13 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
               ${activeTab === 'daily' ? 'border-blue-500 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
             <Clock className="w-4 h-4" /> Resumo Diário
+          </button>
+          <button
+            onClick={() => setActiveTab('serpro')}
+            className={`px-4 py-4 font-medium text-sm flex items-center gap-2 transition-colors border-b-2 whitespace-nowrap
+              ${activeTab === 'serpro' ? 'border-blue-500 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            <ShieldCheck className="w-4 h-4" /> Integra Contador SERPRO
           </button>
         </div>
 
@@ -621,6 +629,12 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                           Disparar Resumo Agora (Teste)
                       </button>
                   </div>
+              </div>
+          )}
+
+          {activeTab === 'serpro' && (
+              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <SerproSettings />
               </div>
           )}
         </div>

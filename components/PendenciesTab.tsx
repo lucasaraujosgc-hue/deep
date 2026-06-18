@@ -29,6 +29,8 @@ interface CompanyPendency {
   pendencies: Pendency[];
   lastUpdated: string;
   unmapped?: boolean;
+  sitfisStatus?: string;
+  sitfisDate?: string;
 }
 
 const parseValue = (val: string) => {
@@ -77,6 +79,25 @@ const PendenciesTab: React.FC = () => {
   useEffect(() => {
     fetchPendencies();
   }, []);
+
+  const [pollingStatus, setPollingStatus] = useState<Record<string, boolean>>({});
+
+  const handleConsultarSerpro = async (companyId: number | string) => {
+      setPollingStatus(prev => ({ ...prev, [companyId]: true }));
+      try {
+          const res = await api.post(`/pendencies/sitfis/${companyId}`, {});
+          if (res.success) {
+              await fetchPendencies();
+              setPollingStatus(prev => ({ ...prev, [companyId]: false }));
+          } else {
+              alert(res.error || "Erro ao iniciar consulta SERPRO");
+              setPollingStatus(prev => ({ ...prev, [companyId]: false }));
+          }
+      } catch (err: any) {
+          alert("Erro de comunicação: " + err.message);
+          setPollingStatus(prev => ({ ...prev, [companyId]: false }));
+      }
+  };
 
   const handleUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -310,6 +331,11 @@ const PendenciesTab: React.FC = () => {
                             {new Date(company.lastUpdated).toLocaleDateString()}
                           </span>
                         )}
+                        {company.sitfisStatus && (
+                          <span className={`text-[10px] uppercase font-bold mt-1 ${company.sitfisStatus === 'ERRO' ? 'text-red-500' : company.sitfisStatus === 'PROCESSANDO' ? 'text-blue-500' : 'text-slate-400'}`}>
+                              SERPRO: {company.sitfisStatus}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -322,16 +348,25 @@ const PendenciesTab: React.FC = () => {
                           Ver Detalhes
                         </button>
                         {!company.unmapped && (
-                          <label className="font-medium text-blue-600 hover:text-blue-700 cursor-pointer transition-colors relative">
-                            Upload
-                            <input
-                              type="file"
-                              accept="application/pdf"
-                              className="hidden"
-                              onChange={(e) => handleUpload(e, company.id)}
-                              disabled={uploading}
-                            />
-                          </label>
+                           <>
+                              <button
+                                onClick={() => handleConsultarSerpro(company.id)}
+                                disabled={pollingStatus[company.id] || company.sitfisStatus === 'PROCESSANDO'}
+                                className="font-medium text-purple-600 hover:text-purple-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              >
+                                {pollingStatus[company.id] || company.sitfisStatus === 'PROCESSANDO' ? 'Consultando...' : 'Consultar (SERPRO)'}
+                              </button>
+                              <label className="font-medium text-blue-600 hover:text-blue-700 cursor-pointer transition-colors relative">
+                                Upload
+                                <input
+                                  type="file"
+                                  accept="application/pdf"
+                                  className="hidden"
+                                  onChange={(e) => handleUpload(e, company.id)}
+                                  disabled={uploading}
+                                />
+                              </label>
+                           </>
                         )}
                       </div>
                     </td>
