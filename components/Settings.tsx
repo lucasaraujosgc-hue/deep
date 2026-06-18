@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Save, User, Mail, MessageCircle, FileText, Check, LayoutTemplate, Link as LinkIcon, Plus, Trash, Clock, CalendarDays, Star, Tag, Smartphone, Send, Loader2, Building2, ShieldCheck } from 'lucide-react';
+import { Save, User, Mail, MessageCircle, FileText, Check, LayoutTemplate, Link as LinkIcon, Plus, Trash, Clock, CalendarDays, Star, Tag, Smartphone, Send, Loader2, Building, Shield } from 'lucide-react';
 import { UserSettings, CategoryRule } from '../types';
 import { DOCUMENT_CATEGORIES } from '../constants';
 import { api } from '../services/api';
@@ -243,7 +243,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
             className={`px-4 py-4 font-medium text-sm flex items-center gap-2 transition-colors border-b-2 whitespace-nowrap
               ${activeTab === 'serpro' ? 'border-blue-500 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
-            <ShieldCheck className="w-4 h-4" /> Integra Contador SERPRO
+            <Shield className="w-4 h-4" /> Integra Contador SERPRO
           </button>
         </div>
 

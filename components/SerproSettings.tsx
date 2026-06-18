@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Check, Upload, Key, FilePlus, Building2, Loader2 } from 'lucide-react';
+import { Save, Check, Upload, Building, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
 
 export const SerproSettings: React.FC = () => {
@@ -64,7 +64,7 @@ export const SerproSettings: React.FC = () => {
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="p-6 border-b border-slate-100 bg-slate-50">
             <h3 className="text-lg font-semibold text-slate-800 flex items-center">
-              <Building2 className="w-5 h-5 mr-2 text-blue-600" />
+              <Building className="w-5 h-5 mr-2 text-blue-600" />
               Integra Contador SERPRO (Situação Fiscal)
             </h3>
             <p className="text-sm text-slate-500 mt-1">
