@@ -290,9 +290,13 @@ router.get("/list", (req, res) => {
     const pendenciesList = db
       .prepare("SELECT * FROM company_pendencies ORDER BY id DESC")
       .all();
+    const sitfisConsultas = db
+      .prepare("SELECT companyId, status, created_at, concluido_at FROM sitfis_consultas ORDER BY id DESC")
+      .all();
 
     const mapped = companies.map((c) => {
       const lastPend = pendenciesList.find((p) => p.companyId === c.id);
+      const lastSitfis = sitfisConsultas.find((s) => s.companyId === c.id);
       return {
         id: c.id,
         name: c.name,
@@ -300,6 +304,8 @@ router.get("/list", (req, res) => {
         hasPendencies: !!lastPend,
         pendencies: lastPend ? JSON.parse(lastPend.extractedData) : [],
         lastUpdated: lastPend ? lastPend.created_at : null,
+        sitfisStatus: lastSitfis ? lastSitfis.status : null,
+        sitfisDate: lastSitfis ? (lastSitfis.concluido_at || lastSitfis.created_at) : null,
       };
     });
 
