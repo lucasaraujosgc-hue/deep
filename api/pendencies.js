@@ -315,7 +315,13 @@ async function getSerproToken(config) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function serproPost(url, token, body, certAgent) {
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token.access_token}` };
+  const headers = { 
+    "Content-Type": "application/json", 
+    "Accept": "application/json",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    Authorization: `Bearer ${token.access_token}` 
+  };
   if (token.jwt_token) headers["jwt_token"] = token.jwt_token;
   return httpsRequest(url, {
     method: "POST",
@@ -360,13 +366,13 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
     log("Solicitando protocolo...");
     const apoiarRes = await serproPost(urls.apoiar, token, buildSitfisPayload(config, cnpjCliente, "SOLICITARPROTOCOLO91"), certAgent);
     let apoiarTexto = await apoiarRes.text();
-    if (!apoiarRes.ok) throw new Error(`SERPRO Apoiar ${apoiarRes.status}: ${apoiarTexto}`);
+    if (!apoiarRes.ok) throw new Error(`SERPRO Apoiar ${apoiarRes.status} (len: ${apoiarTexto.length}): ${apoiarTexto}`);
     
     let protocolo = null;
     let tempoEspera = 5000;
     
     try {
-      const apoiarJson = await apoiarRes.json();
+      const apoiarJson = JSON.parse(apoiarTexto);
       if (apoiarJson.dados) {
         let dadosStr = apoiarJson.dados;
         if (typeof dadosStr === "string") {
@@ -380,7 +386,9 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
       } else if (apoiarJson.protocoloRelatorio) {
         protocolo = apoiarJson.protocoloRelatorio;
       }
-    } catch(e) {}
+    } catch(e) {
+      log(`Erro no parse do JSON Apoiar: ${e.message}`);
+    }
     
     if (!protocolo) throw new Error(`SERPRO não retornou protocoloRelatorio válido. Resposta: ${apoiarTexto}`);
     db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`).run(protocolo, consultaId);
