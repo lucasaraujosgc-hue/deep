@@ -311,7 +311,12 @@ async function getSerproToken(config) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function serproPost(url, token, body, certAgent) {
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token.access_token}` };
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token.access_token}`,
+    "Cache-Control": "no-cache, no-store",
+    "Pragma": "no-cache",
+  };
   if (token.jwt_token) headers["jwt_token"] = token.jwt_token;
   return httpsRequest(url, {
     method: "POST",
