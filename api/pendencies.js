@@ -224,41 +224,6 @@ const SERPRO_URLS = {
 const SITFIS_MAX_TENTATIVAS = 10;
 const SITFIS_TIMEOUT_MS = 5 * 60 * 1000;
 
-// ── Tabelas ───────────────────────────────────────────────────────────────────
-function initSitfisTables(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS serpro_config (
-      id               INTEGER PRIMARY KEY AUTOINCREMENT,
-      usuario_id       INTEGER NOT NULL,
-      consumer_key     TEXT NOT NULL DEFAULT '',
-      consumer_secret  TEXT NOT NULL DEFAULT '',
-      cert_path        TEXT NOT NULL DEFAULT '',
-      cert_senha       TEXT NOT NULL DEFAULT '',
-      cnpj_contratante TEXT NOT NULL DEFAULT '',
-      ambiente         TEXT NOT NULL DEFAULT 'trial',
-      created_at       TEXT DEFAULT (datetime('now')),
-      updated_at       TEXT DEFAULT (datetime('now'))
-    );
-    CREATE TABLE IF NOT EXISTS sitfis_consultas (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      cliente_id   INTEGER NOT NULL,
-      usuario_id   INTEGER NOT NULL,
-      protocolo    TEXT,
-      status       TEXT NOT NULL DEFAULT 'SOLICITADO',
-      pdf_path     TEXT,
-      erro_msg     TEXT,
-      tentativas   INTEGER DEFAULT 0,
-      created_at   TEXT DEFAULT (datetime('now')),
-      concluido_at TEXT
-    );
-  `);
-}
-
-let sitfisTablesReady = false;
-function ensureSitfisTables(db) {
-  if (!sitfisTablesReady) { initSitfisTables(db); sitfisTablesReady = true; }
-}
-
 // ── Cache de tokens em memória ────────────────────────────────────────────────
 const tokenCache = new Map();
 function getCachedToken(usuarioId) {
@@ -437,7 +402,6 @@ const uploadCert = multer({
 router.get("/sitfis/config", (req, res) => {
   try {
     const db = getDb(req.user);
-    ensureSitfisTables(db);
     const cfg = db.prepare("SELECT * FROM serpro_config WHERE usuario_id = ?").get(req.user.id);
     if (!cfg || !cfg.consumer_key) return res.json({ success: true, configured: false });
     res.json({
@@ -455,7 +419,6 @@ router.get("/sitfis/config", (req, res) => {
 router.post("/sitfis/config", uploadCert.single("certificado"), async (req, res) => {
   try {
     const db = getDb(req.user);
-    ensureSitfisTables(db);
     const usuarioId = req.user.id;
     const { consumer_key, consumer_secret, cert_senha, cnpj_contratante, ambiente } = req.body;
 
@@ -505,7 +468,6 @@ router.post("/sitfis/config", uploadCert.single("certificado"), async (req, res)
 router.post("/sitfis/:clienteId", async (req, res) => {
   try {
     const db = getDb(req.user);
-    ensureSitfisTables(db);
     const usuarioId = req.user.id;
     const clienteId = parseInt(req.params.clienteId, 10);
     if (isNaN(clienteId)) return res.status(400).json({ error: "clienteId inválido." });
@@ -531,7 +493,6 @@ router.post("/sitfis/:clienteId", async (req, res) => {
 router.get("/sitfis/:clienteId/historico", (req, res) => {
   try {
     const db = getDb(req.user);
-    ensureSitfisTables(db);
     const clienteId = parseInt(req.params.clienteId, 10);
     const historico = db.prepare(
       `SELECT id, status, tentativas, created_at, concluido_at, erro_msg, pdf_path FROM sitfis_consultas WHERE cliente_id = ? ORDER BY id DESC LIMIT 10`
@@ -544,7 +505,6 @@ router.get("/sitfis/:clienteId/historico", (req, res) => {
 router.get("/sitfis/:clienteId/pdf/:consultaId", (req, res) => {
   try {
     const db = getDb(req.user);
-    ensureSitfisTables(db);
     const usuarioId = req.user.id;
     const consultaId = parseInt(req.params.consultaId, 10);
 

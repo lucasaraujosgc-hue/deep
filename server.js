@@ -225,9 +225,39 @@ export const getDb = (username) => {
         CREATE TABLE IF NOT EXISTS whatsapp_sync (chatId TEXT PRIMARY KEY, lastSyncTimestamp INTEGER);
         CREATE TABLE IF NOT EXISTS whatsapp_contacts (contact_id TEXT PRIMARY KEY, name TEXT, phone_number TEXT, last_seen TIMESTAMP);
         CREATE TABLE IF NOT EXISTS company_pendencies (id INTEGER PRIMARY KEY AUTOINCREMENT, companyId INTEGER, docNumber TEXT, companyName TEXT, filename TEXT, extractedData TEXT, created_at TEXT);
+        
+        DROP TABLE IF EXISTS serpro_config; 
+        DROP TABLE IF EXISTS sitfis_consultas;
+        
+        CREATE TABLE IF NOT EXISTS serpro_config (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          usuario_id       INTEGER NOT NULL,
+          consumer_key     TEXT NOT NULL DEFAULT '',
+          consumer_secret  TEXT NOT NULL DEFAULT '',
+          cert_path        TEXT NOT NULL DEFAULT '',
+          cert_senha       TEXT NOT NULL DEFAULT '',
+          cnpj_contratante TEXT NOT NULL DEFAULT '',
+          ambiente         TEXT NOT NULL DEFAULT 'trial',
+          created_at       TEXT DEFAULT (datetime('now')),
+          updated_at       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS sitfis_consultas (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          cliente_id   INTEGER NOT NULL,
+          usuario_id   INTEGER NOT NULL,
+          protocolo    TEXT,
+          status       TEXT NOT NULL DEFAULT 'SOLICITADO',
+          pdf_path     TEXT,
+          erro_msg     TEXT,
+          tentativas   INTEGER DEFAULT 0,
+          created_at   TEXT DEFAULT (datetime('now')),
+          concluido_at TEXT
+        );
+
         CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chatId ON whatsapp_messages(chatId);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_timestamp ON whatsapp_messages(timestamp);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_contacts_name ON whatsapp_contacts(name);
+        
         CREATE INDEX IF NOT EXISTS idx_whatsapp_contacts_phone ON whatsapp_contacts(phone_number);
     `);
 
