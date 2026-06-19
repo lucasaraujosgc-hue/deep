@@ -226,9 +226,6 @@ export const getDb = (username) => {
         CREATE TABLE IF NOT EXISTS whatsapp_contacts (contact_id TEXT PRIMARY KEY, name TEXT, phone_number TEXT, last_seen TIMESTAMP);
         CREATE TABLE IF NOT EXISTS company_pendencies (id INTEGER PRIMARY KEY AUTOINCREMENT, companyId INTEGER, docNumber TEXT, companyName TEXT, filename TEXT, extractedData TEXT, created_at TEXT);
         
-        DROP TABLE IF EXISTS serpro_config; 
-        DROP TABLE IF EXISTS sitfis_consultas;
-        
         CREATE TABLE IF NOT EXISTS serpro_config (
           id               INTEGER PRIMARY KEY AUTOINCREMENT,
           usuario_id       INTEGER NOT NULL,
