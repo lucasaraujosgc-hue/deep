@@ -402,7 +402,7 @@ const uploadCert = multer({
 router.get("/sitfis/config", (req, res) => {
   try {
     const db = getDb(req.user);
-    const cfg = db.prepare("SELECT * FROM serpro_config WHERE usuario_id = ?").get(req.user.id);
+    const cfg = db.prepare("SELECT * FROM serpro_config WHERE usuario_id = ?").get(1);
     if (!cfg || !cfg.consumer_key) return res.json({ success: true, configured: false });
     res.json({
       success: true,
@@ -419,7 +419,7 @@ router.get("/sitfis/config", (req, res) => {
 router.post("/sitfis/config", uploadCert.single("certificado"), async (req, res) => {
   try {
     const db = getDb(req.user);
-    const usuarioId = req.user.id;
+    const usuarioId = 1;
     const { consumer_key, consumer_secret, cert_senha, cnpj_contratante, ambiente } = req.body;
 
     if (!consumer_key || !consumer_secret || !cnpj_contratante) {
@@ -468,7 +468,7 @@ router.post("/sitfis/config", uploadCert.single("certificado"), async (req, res)
 router.post("/sitfis/:clienteId", async (req, res) => {
   try {
     const db = getDb(req.user);
-    const usuarioId = req.user.id;
+    const usuarioId = 1;
     const clienteId = parseInt(req.params.clienteId, 10);
     if (isNaN(clienteId)) return res.status(400).json({ error: "clienteId inválido." });
 
@@ -505,7 +505,7 @@ router.get("/sitfis/:clienteId/historico", (req, res) => {
 router.get("/sitfis/:clienteId/pdf/:consultaId", (req, res) => {
   try {
     const db = getDb(req.user);
-    const usuarioId = req.user.id;
+    const usuarioId = 1;
     const consultaId = parseInt(req.params.consultaId, 10);
 
     const consulta = db.prepare(
