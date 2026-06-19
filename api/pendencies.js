@@ -236,12 +236,16 @@ function getCachedToken(usuarioId) {
 function httpsRequest(urlString, options, body = null) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString);
+    const headers = options.headers || {};
+    if (body) {
+      headers["Content-Length"] = Buffer.byteLength(body, "utf8");
+    }
     const opts = {
       hostname: url.hostname,
       port: url.port || 443,
       path: url.pathname + url.search,
       method: options.method || "GET",
-      headers: options.headers || {},
+      headers: headers,
       agent: options.agent,
     };
 
