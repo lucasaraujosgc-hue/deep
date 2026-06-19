@@ -232,16 +232,20 @@ function getCachedToken(usuarioId) {
   return c;
 }
 
-// ── Helper para requests HTTPS com mTLS ──────────────────────────────────────
+// ── Helper para requests HTTPS com mTLS ──────────────────────────────────────────
 function httpsRequest(urlString, options, body = null) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString);
+    const headers = options.headers || {};
+    if (body) {
+      headers["Content-Length"] = Buffer.byteLength(body, "utf8");
+    }
     const opts = {
       hostname: url.hostname,
       port: url.port || 443,
       path: url.pathname + url.search,
       method: options.method || "GET",
-      headers: options.headers || {},
+      headers: headers,
       agent: options.agent,
     };
 
@@ -258,10 +262,10 @@ function httpsRequest(urlString, options, body = null) {
             get: (name) => {
               const val = res.headers[name.toLowerCase()];
               return Array.isArray(val) ? val[0] : val;
-            },
+            }
           },
           text: async () => text,
-          json: async () => (text ? JSON.parse(text) : {}),
+          json: async () => text ? JSON.parse(text) : {},
         };
         resolve(response);
       });
@@ -311,11 +315,12 @@ async function getSerproToken(config) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function serproPost(url, token, body, certAgent) {
-  const headers = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token.access_token}`,
-    "Cache-Control": "no-cache, no-store",
+  const headers = { 
+    "Content-Type": "application/json", 
+    "Accept": "application/json",
+    "Cache-Control": "no-cache",
     "Pragma": "no-cache",
+    Authorization: `Bearer ${token.access_token}` 
   };
   if (token.jwt_token) headers["jwt_token"] = token.jwt_token;
   return httpsRequest(url, {
@@ -335,54 +340,28 @@ function buildSitfisPayload(config, cnpjCliente, idServico, dados = "") {
   };
 }
 
+function extractSerproData(text) {
+  try {
+    const root = JSON.parse(text);
+    if (!root) return null;
+    let dados = root.dados;
+    if (typeof dados === "string") {
+      try { dados = JSON.parse(dados); } catch(e) {}
+    }
+    if (Array.isArray(dados)) {
+      if (dados.length > 0) return dados[0];
+      return {};
+    }
+    if (typeof dados === "object" && dados !== null) {
+      return dados;
+    }
+    return root; 
+  } catch(e) {
+    return null;
+  }
+}
+
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-
-// ── Extrai o protocoloRelatorio da resposta do /Apoiar ────────────────────────
-// O SERPRO retorna um JSON com campo "dados" que é uma string JSON aninhada:
-// { dados: '{"protocoloRelatorio":"<token base64>","tempoEspera":4000}', ... }
-// Esta função desce todas as camadas e devolve apenas o token.
-function extrairProtocolo(apoiarJson) {
-  // Camada 1: apoiarJson.dados é uma string JSON
-  if (apoiarJson.dados) {
-    try {
-      const dadosInner = typeof apoiarJson.dados === "string"
-        ? JSON.parse(apoiarJson.dados)
-        : apoiarJson.dados;
-      if (dadosInner.protocoloRelatorio) return dadosInner.protocoloRelatorio;
-    } catch (e) {
-      // continua tentando
-    }
-  }
-
-  // Camada alternativa: protocoloRelatorio direto na raiz
-  if (apoiarJson.protocoloRelatorio) return apoiarJson.protocoloRelatorio;
-
-  return null;
-}
-
-// ── Extrai o PDF base64 da resposta do /Emitir ────────────────────────────────
-// Assim como no /Apoiar, o PDF vem dentro de dados.dados (string JSON aninhada):
-// { dados: '{"pdf":"<base64>"}', ... }
-function extrairPdf(emitirJson) {
-  // Camada 1: emitirJson.dados é uma string JSON
-  if (emitirJson.dados) {
-    try {
-      const dadosInner = typeof emitirJson.dados === "string"
-        ? JSON.parse(emitirJson.dados)
-        : emitirJson.dados;
-      if (dadosInner.pdf) return dadosInner.pdf;
-      // Alguns ambientes retornam o base64 direto como string
-      if (typeof dadosInner === "string" && dadosInner.length > 100) return dadosInner;
-    } catch (e) {
-      // continua tentando
-    }
-  }
-
-  // Camada alternativa: pdf direto na raiz
-  if (emitirJson.pdf) return emitirJson.pdf;
-
-  return null;
-}
 
 // ── Fluxo principal ───────────────────────────────────────────────────────────
 async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
@@ -404,42 +383,33 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
 
     const urls = SERPRO_URLS[config.ambiente];
 
-    // ── Etapa 1 — Solicitar protocolo (/Apoiar) ───────────────────────────────
+    // Etapa 2 — protocolo
     log("Solicitando protocolo...");
-    const apoiarRes = await serproPost(
-      urls.apoiar,
-      token,
-      buildSitfisPayload(config, cnpjCliente, "SOLICITARPROTOCOLO91"),
-      certAgent
-    );
-
-    if (!apoiarRes.ok) {
-      throw new Error(`SERPRO Apoiar ${apoiarRes.status}: ${await apoiarRes.text()}`);
+    const apoiarRes = await serproPost(urls.apoiar, token, buildSitfisPayload(config, cnpjCliente, "SOLICITARPROTOCOLO91"), certAgent);
+    let apoiarTexto = await apoiarRes.text();
+    
+    // Tratamento especial se SERPRO retornar 304
+    if (apoiarRes.status === 304) {
+      throw new Error(`SERPRO retornou 304 (Not Modified). Isso costuma ocorrer se o relatório exato foi solicitado há pouco tempo. O relatório não é regerado dentro de 24h.`);
     }
 
-    const apoiarJson = await apoiarRes.json();
-    log(`Apoiar resposta: ${JSON.stringify(apoiarJson)}`);
-
-    const protocoloRelatorio = extrairProtocolo(apoiarJson);
-    if (!protocoloRelatorio) {
-      throw new Error(`SERPRO não retornou protocoloRelatorio válido. Resposta: ${JSON.stringify(apoiarJson)}`);
+    if (!apoiarRes.ok) throw new Error(`SERPRO Apoiar ${apoiarRes.status} (len: ${apoiarTexto.length}): ${apoiarTexto}`);
+    
+    let protocolo = null;
+    let tempoEspera = 5000;
+    
+    const apoiarData = extractSerproData(apoiarTexto);
+    if (apoiarData) {
+      if (apoiarData.protocoloRelatorio) protocolo = apoiarData.protocoloRelatorio;
+      if (apoiarData.tempoEspera) tempoEspera = apoiarData.tempoEspera;
     }
+    
+    if (!protocolo) throw new Error(`SERPRO não retornou protocoloRelatorio válido. Resposta: ${apoiarTexto}`);
+    db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`).run(protocolo, consultaId);
 
-    log(`Protocolo obtido: ${protocoloRelatorio.substring(0, 40)}...`);
-    db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`)
-      .run(protocoloRelatorio, consultaId);
-
-    // ── Etapa 2 — Emitir relatório com polling (/Emitir) ─────────────────────
+    // Etapa 3 — emitir com polling
     log("Emitindo relatório...");
-
-    // O campo "dados" deve conter APENAS o token extraído, não a resposta inteira do /Apoiar
-    const emitirPayload = buildSitfisPayload(
-      config,
-      cnpjCliente,
-      "RELATORIOSITFIS92",
-      JSON.stringify({ protocoloRelatorio })
-    );
-
+    const emitirPayload = buildSitfisPayload(config, cnpjCliente, "RELATORIOSITFIS92", JSON.stringify({ protocoloRelatorio: protocolo }));
     const deadline = Date.now() + SITFIS_TIMEOUT_MS;
     let tentativa = 0;
     let pdfBase64 = null;
@@ -450,33 +420,28 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
       log(`Tentativa ${tentativa}...`);
 
       const emitirRes = await serproPost(urls.emitir, token, emitirPayload, certAgent);
+      let emitirTexto = await emitirRes.text();
 
       if (emitirRes.status === 200) {
-        const emitirJson = await emitirRes.json();
-        log(`Emitir 200 resposta: ${JSON.stringify(emitirJson).substring(0, 200)}`);
-
-        const pdf = extrairPdf(emitirJson);
-        if (!pdf) throw new Error("Status 200 mas sem PDF na resposta.");
-        pdfBase64 = pdf;
+        const emitirData = extractSerproData(emitirTexto);
+        if (emitirData && emitirData.pdf) {
+          pdfBase64 = emitirData.pdf;
+        } else {
+          pdfBase64 = emitirTexto; // Fallback extremo
+        }
+        
+        if (!pdfBase64 || pdfBase64 === emitirTexto) {
+          log(`Status 200 recebido, mas PDF não encontrado. Analisando estrutura...`);
+        }
         break;
-
       } else if (emitirRes.status === 202) {
-        // Relatório ainda sendo gerado — aguarda tempoEspera se informado
         let waitTime = 5000;
-        try {
-          const emitirJson = await emitirRes.json();
-          const dadosInner = emitirJson.dados
-            ? (typeof emitirJson.dados === "string" ? JSON.parse(emitirJson.dados) : emitirJson.dados)
-            : {};
-          if (dadosInner.tempoEspera) waitTime = dadosInner.tempoEspera;
-        } catch (e) {}
-        log(`Aguardando ${waitTime}ms...`);
+        const emitirData = extractSerproData(emitirTexto);
+        if (emitirData && emitirData.tempoEspera) waitTime = emitirData.tempoEspera;
         await sleep(waitTime);
-
       } else if (emitirRes.status === 204) {
         const retryAfter = emitirRes.headers.get("Retry-After");
         await sleep(retryAfter ? parseInt(retryAfter) * 1000 : 5000);
-
       } else {
         throw new Error(`SERPRO Emitir ${emitirRes.status}: ${await emitirRes.text()}`);
       }
@@ -484,13 +449,12 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
 
     if (!pdfBase64) throw new Error("Timeout: consulta excedeu 5 minutos. Tente novamente.");
 
-    // ── Salva PDF ─────────────────────────────────────────────────────────────
+    // Salva PDF
     const pdfDir = process.env.DATA_PATH ? path.join(process.env.DATA_PATH, "sitfis_pdfs") : "data/sitfis_pdfs";
     fs.mkdirSync(pdfDir, { recursive: true });
     const pdfPath = path.join(pdfDir, `sitfis_${clienteId}_${consultaId}.pdf`);
     fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, "base64"));
-    db.prepare(`UPDATE sitfis_consultas SET status = 'CONCLUIDO', pdf_path = ?, concluido_at = datetime('now') WHERE id = ?`)
-      .run(pdfPath, consultaId);
+    db.prepare(`UPDATE sitfis_consultas SET status = 'CONCLUIDO', pdf_path = ?, concluido_at = datetime('now') WHERE id = ?`).run(pdfPath, consultaId);
     log("Concluído.");
 
     return { status: "CONCLUIDO", pdfBase64, consultaId };
