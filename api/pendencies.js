@@ -355,25 +355,36 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
     // Etapa 2 — protocolo
     log("Solicitando protocolo...");
     const apoiarRes = await serproPost(urls.apoiar, token, buildSitfisPayload(config, cnpjCliente, "SOLICITARPROTOCOLO91"), certAgent);
-    if (!apoiarRes.ok) throw new Error(`SERPRO Apoiar ${apoiarRes.status}: ${await apoiarRes.text()}`);
     let apoiarTexto = await apoiarRes.text();
-    apoiarTexto = apoiarTexto.trim();
-    if (apoiarTexto.startsWith('"') && apoiarTexto.endsWith('"')) {
-      apoiarTexto = apoiarTexto.substring(1, apoiarTexto.length - 1);
-    }
-    const protocolo = apoiarTexto;
-    if (!protocolo || protocolo.includes("{")) {
-       try {
-         const json = JSON.parse(protocolo);
-         if (json.protocoloRelatorio) apoiarTexto = json.protocoloRelatorio;
-       } catch(e) {}
-    }
-    if (!apoiarTexto) throw new Error(`SERPRO não retornou protocoloRelatorio válido. Resposta: ${protocolo}`);
-    db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`).run(apoiarTexto, consultaId);
+    if (!apoiarRes.ok) throw new Error(`SERPRO Apoiar ${apoiarRes.status}: ${apoiarTexto}`);
+    
+    let protocolo = null;
+    let tempoEspera = 5000;
+    
+    try {
+      const apoiarJson = await apoiarRes.json();
+      if (apoiarJson.dados) {
+        let dadosStr = apoiarJson.dados;
+        if (typeof dadosStr === "string") {
+          const dadosObj = JSON.parse(dadosStr);
+          protocolo = dadosObj.protocoloRelatorio;
+          if (dadosObj.tempoEspera) tempoEspera = dadosObj.tempoEspera;
+        } else if (typeof dadosStr === "object") {
+           protocolo = dadosStr.protocoloRelatorio;
+           if (dadosStr.tempoEspera) tempoEspera = dadosStr.tempoEspera;
+        }
+      } else if (apoiarJson.protocoloRelatorio) {
+        protocolo = apoiarJson.protocoloRelatorio;
+      }
+    } catch(e) {}
+    
+    if (!protocolo) throw new Error(`SERPRO não retornou protocoloRelatorio válido. Resposta: ${apoiarTexto}`);
+    db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`).run(protocolo, consultaId);
 
     // Etapa 3 — emitir com polling
     log("Emitindo relatório...");
-    const emitirPayload = buildSitfisPayload(config, cnpjCliente, "RELATORIOSITFIS92", JSON.stringify({ protocoloRelatorio: apoiarTexto }));
+    // A documentação diz: "dados": "{ \"protocoloRelatorio\": \"{PROTOCOLO_DA_ETAPA_2}\" }"
+    const emitirPayload = buildSitfisPayload(config, cnpjCliente, "RELATORIOSITFIS92", JSON.stringify({ protocoloRelatorio: protocolo }));
     const deadline = Date.now() + SITFIS_TIMEOUT_MS;
     let tentativa = 0;
     let pdfBase64 = null;
@@ -386,25 +397,48 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
       const emitirRes = await serproPost(urls.emitir, token, emitirPayload, certAgent);
 
       if (emitirRes.status === 200) {
-        let dText = await emitirRes.text();
-        dText = dText.trim();
-        if (dText.startsWith('"') && dText.endsWith('"')) {
-          dText = dText.substring(1, dText.length - 1);
-        }
+        let emitDText = await emitirRes.text();
         try {
-          const json = JSON.parse(dText);
-          if (json.pdf) dText = json.pdf;
-        } catch(e) {}
+          const emitirJson = JSON.parse(emitDText);
+          if (emitirJson.dados) {
+             let emitirDadosStr = emitirJson.dados;
+             if (typeof emitirDadosStr === "string") {
+               try {
+                 const emitirDadosObj = JSON.parse(emitirDadosStr);
+                 if (emitirDadosObj.pdf) pdfBase64 = emitirDadosObj.pdf;
+                 else pdfBase64 = emitirDadosStr;
+               } catch(e) {
+                 pdfBase64 = emitirDadosStr;
+               }
+             } else if (typeof emitirDadosStr === "object") {
+                if (emitirDadosStr.pdf) pdfBase64 = emitirDadosStr.pdf;
+                else pdfBase64 = JSON.stringify(emitirDadosStr);
+             }
+          } else if (emitirJson.pdf) {
+             pdfBase64 = emitirJson.pdf;
+          }
+        } catch(e) {
+           pdfBase64 = emitDText;
+        }
         
-        if (!dText) throw new Error("Status 200 mas sem PDF na resposta.");
-        pdfBase64 = dText;
+        if (!pdfBase64) throw new Error("Status 200 mas sem PDF na resposta.");
         break;
       } else if (emitirRes.status === 202) {
-        let dText = await emitirRes.text();
         let waitTime = 5000;
         try {
-          const json = JSON.parse(dText);
-          if (json.tempoEspera) waitTime = json.tempoEspera;
+          const emitDText = await emitirRes.text();
+          const emitirJson = JSON.parse(emitDText);
+          if (emitirJson.dados) {
+             let emitirDadosStr = emitirJson.dados;
+             if (typeof emitirDadosStr === "string") {
+                const emitirDadosObj = JSON.parse(emitirDadosStr);
+                if (emitirDadosObj.tempoEspera) waitTime = emitirDadosObj.tempoEspera;
+             } else if (typeof emitirDadosStr === "object") {
+                if (emitirDadosStr.tempoEspera) waitTime = emitirDadosStr.tempoEspera;
+             }
+          } else if (emitirJson.tempoEspera) {
+             waitTime = emitirJson.tempoEspera;
+          }
         } catch(e) {}
         await sleep(waitTime);
       } else if (emitirRes.status === 204) {
