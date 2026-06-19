@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import {
   Save, User, Mail, MessageCircle, FileText, Check,
@@ -94,7 +93,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
     setLoadingSerproStatus(true);
     try {
       const token = localStorage.getItem('cm_auth_token') || '';
-      const res = await fetch('/api/sitfis/config', {
+      const res = await fetch('/api/pendencies/sitfis/config', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -155,7 +154,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
         fd.append('certificado', serproForm.cert_file);
       }
 
-      const res = await fetch('/api/sitfis/config', {
+      const res = await fetch('/api/pendencies/sitfis/config', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: fd,

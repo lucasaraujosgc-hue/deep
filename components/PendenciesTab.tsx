@@ -137,7 +137,7 @@ const PendenciesTab: React.FC = () => {
     });
 
     try {
-      const res = await fetch(`/api/sitfis/${id}`, {
+      const res = await fetch(`/api/pendencies/sitfis/${id}`, {
         method: "POST",
         headers: authHeader(),
       });
@@ -170,7 +170,7 @@ const PendenciesTab: React.FC = () => {
   // ── Download de PDF do histórico ──────────────────────────────────────────────
   const handleDownloadPdf = async (clienteId: number, consultaId: number, nomeEmpresa: string) => {
     try {
-      const res = await fetch(`/api/sitfis/${clienteId}/pdf/${consultaId}`, {
+      const res = await fetch(`/api/pendencies/sitfis/${clienteId}/pdf/${consultaId}`, {
         headers: authHeader(),
       });
       if (!res.ok) { alert("PDF não encontrado."); return; }
@@ -204,7 +204,7 @@ const PendenciesTab: React.FC = () => {
     setShowHistorico(true);
     setLoadingHistorico(true);
     try {
-      const res = await fetch(`/api/sitfis/${company.id}/historico`, { headers: authHeader() });
+      const res = await fetch(`/api/pendencies/sitfis/${company.id}/historico`, { headers: authHeader() });
       const data = await res.json();
       setHistorico(data.historico || []);
     } catch {
