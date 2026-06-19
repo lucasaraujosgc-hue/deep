@@ -185,7 +185,7 @@ const App: React.FC = () => {
                   onClearPendingDocuments={handleClearPendingDocuments}
                />;
       case 'bulksend':
-        return <BulkSend />;
+        return <BulkSend userSettings={userSettings} />;
       case 'scheduled':
         return <ScheduledMessages />;
       case 'settings':

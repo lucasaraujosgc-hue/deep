@@ -1,10 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { Mail, MessageCircle, Calendar, Send, CheckSquare, Square, ArrowLeft, Loader2, Upload, X } from 'lucide-react';
-import { Company, ScheduledMessage } from '../types';
+import { Mail, MessageCircle, Calendar, Send, CheckSquare, Square, ArrowLeft, Loader2, Upload, X, Search, Filter } from 'lucide-react';
+import { Company, ScheduledMessage, UserSettings } from '../types';
 import { api } from '../services/api';
 
-const BulkSend: React.FC = () => {
+interface BulkSendProps {
+  userSettings?: UserSettings;
+}
+
+const BulkSend: React.FC<BulkSendProps> = ({ userSettings }) => {
   const [schedule, setSchedule] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -18,6 +22,10 @@ const BulkSend: React.FC = () => {
   const [channels, setChannels] = useState({ email: true, whatsapp: false });
   const [attachment, setAttachment] = useState<File | null>(null);
 
+  // Filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+
   useEffect(() => {
     setLoading(true);
     api.getCompanies()
@@ -30,7 +38,17 @@ const BulkSend: React.FC = () => {
         .finally(() => setLoading(false));
   }, []);
 
-  const filteredCompanies = companies;
+  const filteredCompanies = companies.filter(company => {
+    const searchLower = searchTerm.toLowerCase();
+    const nameMatch = (company.name || '').toLowerCase().includes(searchLower);
+    const docMatch = (company.docNumber || '').includes(searchLower);
+    const emailMatch = (company.email || '').toLowerCase().includes(searchLower);
+    const matchesSearch = nameMatch || docMatch || emailMatch;
+
+    const matchesTag = tagFilter ? (company.categories || []).includes(tagFilter) : true;
+
+    return matchesSearch && matchesTag;
+  });
 
   const toggleSelectAll = () => {
       const filteredIds = filteredCompanies.map(c => c.id);
@@ -214,6 +232,30 @@ const BulkSend: React.FC = () => {
           </div>
 
           <div className="mb-6">
+              {/* Filters for Companies */}
+              <div className="flex gap-4 mb-4">
+                  <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input 
+                        type="text" 
+                        placeholder="Buscar por nome, CNPJ ou email..." 
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                  </div>
+                  <select 
+                      className="border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      value={tagFilter}
+                      onChange={(e) => setTagFilter(e.target.value)}
+                  >
+                      <option value="">Todas as Tags</option>
+                      {userSettings?.companyCategories?.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                  </select>
+              </div>
+
               <div className="flex justify-between items-center mb-2 bg-gray-100 p-2 rounded-t-lg border-b border-gray-200">
                   <h3 className="font-bold text-gray-700 px-2">Empresas Destinatárias ({selectedCompanies.filter(id => filteredCompanies.some(c => c.id === id)).length})</h3>
                   <button onClick={toggleSelectAll} className="text-sm text-blue-600 hover:underline px-2 font-medium">
@@ -232,7 +274,22 @@ const BulkSend: React.FC = () => {
                             className="w-4 h-4 rounded text-blue-600 mr-3"
                           />
                           <div className="flex-1">
-                              <div className="font-medium text-sm text-gray-900">{company.name}</div>
+                              <div className="font-medium text-sm text-gray-900 flex items-center gap-2">
+                                  {company.name}
+                                  {company.categories && company.categories.length > 0 && (
+                                     <div className="flex gap-1">
+                                        {company.categories.map(catId => {
+                                            const cat = userSettings?.companyCategories?.find(c => c.id === catId);
+                                            if (!cat) return null;
+                                            return (
+                                                <span key={cat.id} className="text-[10px] px-1.5 py-0.5 rounded-full text-white" style={{backgroundColor: cat.color}}>
+                                                    {cat.name}
+                                                </span>
+                                            );
+                                        })}
+                                     </div>
+                                  )}
+                              </div>
                               <div className="text-xs text-gray-500">{company.email} • {company.whatsapp}</div>
                           </div>
                           <div className="text-xs text-gray-400 font-mono">{company.docNumber}</div>
