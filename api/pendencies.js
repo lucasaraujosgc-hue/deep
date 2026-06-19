@@ -232,22 +232,62 @@ function getCachedToken(usuarioId) {
   return c;
 }
 
+// ── Helper para requests HTTPS com mTLS ──────────────────────────────────────────
+function httpsRequest(urlString, options, body = null) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlString);
+    const opts = {
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: url.pathname + url.search,
+      method: options.method || "GET",
+      headers: options.headers || {},
+      agent: options.agent,
+    };
+
+    const req = https.request(opts, (res) => {
+      let data = [];
+      res.on("data", (chunk) => data.push(chunk));
+      res.on("end", () => {
+        const bodyBuffer = Buffer.concat(data);
+        const text = bodyBuffer.toString("utf8");
+        const response = {
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          headers: {
+            get: (name) => {
+              const val = res.headers[name.toLowerCase()];
+              return Array.isArray(val) ? val[0] : val;
+            }
+          },
+          text: async () => text,
+          json: async () => text ? JSON.parse(text) : {},
+        };
+        resolve(response);
+      });
+    });
+
+    req.on("error", (err) => reject(err));
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 // ── Token de produção via OAuth2 + mTLS ───────────────────────────────────────
 async function fetchProductionToken(config) {
   const certBuffer = fs.readFileSync(config.cert_path);
   const credentials = Buffer.from(`${config.consumer_key}:${config.consumer_secret}`).toString("base64");
   const agent = new https.Agent({ pfx: certBuffer, passphrase: config.cert_senha, rejectUnauthorized: true });
 
-  const res = await fetch(SERPRO_AUTH_URL, {
+  const res = await httpsRequest(SERPRO_AUTH_URL, {
     method: "POST",
     headers: {
       Authorization: `Basic ${credentials}`,
       "role-type": "TERCEIROS",
       "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: "grant_type=client_credentials",
     agent,
-  });
+  }, "grant_type=client_credentials");
 
   if (!res.ok) throw new Error(`Auth SERPRO falhou (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -273,12 +313,11 @@ async function getSerproToken(config) {
 async function serproPost(url, token, body, certAgent) {
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token.access_token}` };
   if (token.jwt_token) headers["jwt_token"] = token.jwt_token;
-  return fetch(url, {
+  return httpsRequest(url, {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
-    ...(certAgent ? { agent: certAgent } : {}),
-  });
+    agent: certAgent || undefined,
+  }, JSON.stringify(body));
 }
 
 function buildSitfisPayload(config, cnpjCliente, idServico, dados = "") {
