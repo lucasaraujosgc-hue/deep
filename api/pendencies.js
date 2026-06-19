@@ -452,9 +452,24 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
     // Salva PDF
     const pdfDir = process.env.DATA_PATH ? path.join(process.env.DATA_PATH, "sitfis_pdfs") : "data/sitfis_pdfs";
     fs.mkdirSync(pdfDir, { recursive: true });
-    const pdfPath = path.join(pdfDir, `sitfis_${clienteId}_${consultaId}.pdf`);
+    const pdfFilename = `sitfis_${clienteId}_${consultaId}.pdf`;
+    const pdfPath = path.join(pdfDir, pdfFilename);
     fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, "base64"));
     db.prepare(`UPDATE sitfis_consultas SET status = 'CONCLUIDO', pdf_path = ?, concluido_at = datetime('now') WHERE id = ?`).run(pdfPath, consultaId);
+
+    log("Iniciando análise por IA automática do PDF baixado do SERPRO...");
+    try {
+       let extracted = fastParsePdfForNegativeCert(pdfPath);
+       if (!extracted) extracted = await analyzePdfWithAI(pdfPath);
+       
+       const finalCompanyName = extracted.companyName || config.cnpj_contratante;
+       db.prepare(`INSERT INTO company_pendencies (companyId, docNumber, companyName, filename, extractedData, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+         .run(clienteId, extracted.cnpj || cnpjCliente, finalCompanyName, pdfFilename, JSON.stringify(extracted.pendencies), new Date().toISOString());
+       log("Análise do PDF automática concluída com sucesso.");
+    } catch(e) {
+       log("Erro na análise automática do SitFis: " + e.message);
+    }
+
     log("Concluído.");
 
     return { status: "CONCLUIDO", pdfBase64, consultaId };

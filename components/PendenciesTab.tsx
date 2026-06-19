@@ -153,9 +153,9 @@ const PendenciesTab: React.FC = () => {
 
       setSitfisResult((prev) => ({ ...prev, [id]: data }));
 
-      // Se PDF foi retornado, oferece download imediato
-      if (data.status === "CONCLUIDO" && data.pdfBase64) {
-        downloadPdfFromBase64(data.pdfBase64, `sitfis_${company.name}_${id}.pdf`);
+      // Recarrega a lista para mostrar os dados extraídos, já que a análise na backend será automática
+      if (data.status === "CONCLUIDO") {
+        fetchPendencies();
       }
     } catch (e: any) {
       setSitfisResult((prev) => ({
