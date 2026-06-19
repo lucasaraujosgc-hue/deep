@@ -356,14 +356,24 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
     log("Solicitando protocolo...");
     const apoiarRes = await serproPost(urls.apoiar, token, buildSitfisPayload(config, cnpjCliente, "SOLICITARPROTOCOLO91"), certAgent);
     if (!apoiarRes.ok) throw new Error(`SERPRO Apoiar ${apoiarRes.status}: ${await apoiarRes.text()}`);
-    const apoiarData = await apoiarRes.json();
-    const protocolo = apoiarData.protocoloRelatorio;
-    if (!protocolo) throw new Error("SERPRO não retornou protocoloRelatorio.");
-    db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`).run(protocolo, consultaId);
+    let apoiarTexto = await apoiarRes.text();
+    apoiarTexto = apoiarTexto.trim();
+    if (apoiarTexto.startsWith('"') && apoiarTexto.endsWith('"')) {
+      apoiarTexto = apoiarTexto.substring(1, apoiarTexto.length - 1);
+    }
+    const protocolo = apoiarTexto;
+    if (!protocolo || protocolo.includes("{")) {
+       try {
+         const json = JSON.parse(protocolo);
+         if (json.protocoloRelatorio) apoiarTexto = json.protocoloRelatorio;
+       } catch(e) {}
+    }
+    if (!apoiarTexto) throw new Error(`SERPRO não retornou protocoloRelatorio válido. Resposta: ${protocolo}`);
+    db.prepare(`UPDATE sitfis_consultas SET protocolo = ?, status = 'PROCESSANDO' WHERE id = ?`).run(apoiarTexto, consultaId);
 
     // Etapa 3 — emitir com polling
     log("Emitindo relatório...");
-    const emitirPayload = buildSitfisPayload(config, cnpjCliente, "RELATORIOSITFIS92", JSON.stringify({ protocoloRelatorio: protocolo }));
+    const emitirPayload = buildSitfisPayload(config, cnpjCliente, "RELATORIOSITFIS92", JSON.stringify({ protocoloRelatorio: apoiarTexto }));
     const deadline = Date.now() + SITFIS_TIMEOUT_MS;
     let tentativa = 0;
     let pdfBase64 = null;
@@ -376,13 +386,27 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
       const emitirRes = await serproPost(urls.emitir, token, emitirPayload, certAgent);
 
       if (emitirRes.status === 200) {
-        const d = await emitirRes.json();
-        if (!d.pdf) throw new Error("Status 200 mas sem campo pdf na resposta.");
-        pdfBase64 = d.pdf;
+        let dText = await emitirRes.text();
+        dText = dText.trim();
+        if (dText.startsWith('"') && dText.endsWith('"')) {
+          dText = dText.substring(1, dText.length - 1);
+        }
+        try {
+          const json = JSON.parse(dText);
+          if (json.pdf) dText = json.pdf;
+        } catch(e) {}
+        
+        if (!dText) throw new Error("Status 200 mas sem PDF na resposta.");
+        pdfBase64 = dText;
         break;
       } else if (emitirRes.status === 202) {
-        const d = await emitirRes.json();
-        await sleep(d.tempoEspera ?? 5000);
+        let dText = await emitirRes.text();
+        let waitTime = 5000;
+        try {
+          const json = JSON.parse(dText);
+          if (json.tempoEspera) waitTime = json.tempoEspera;
+        } catch(e) {}
+        await sleep(waitTime);
       } else if (emitirRes.status === 204) {
         const retryAfter = emitirRes.headers.get("Retry-After");
         await sleep(retryAfter ? parseInt(retryAfter) * 1000 : 5000);
