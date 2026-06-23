@@ -355,14 +355,14 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
       {/* New/Edit Company Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl w-full max-w-md">
-             <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+          <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+             <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                 <h3 className="font-bold text-gray-800">{editingId ? 'Editar Empresa' : 'Nova Empresa'}</h3>
                 <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                    <X className="w-5 h-5" />
                 </button>
              </div>
-             <form onSubmit={handleSaveCompany} className="p-6 space-y-4">
+             <form onSubmit={handleSaveCompany} className="p-6 space-y-4 overflow-y-auto flex-1">
                 <div>
                    <label className="block text-sm font-semibold text-gray-700 mb-1">Razão Social / Nome*</label>
                    <input 
@@ -454,27 +454,33 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
                    />
                 </div>
 
-                {editingId && newCompany.companyHash && (
+                {editingId && (
                     <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg flex justify-between items-center">
                         <div>
                             <div className="text-xs font-semibold text-gray-500 uppercase">Hash de Integração (Portal)</div>
-                            <code className="text-xs text-gray-700 select-all">{newCompany.companyHash}</code>
+                            {newCompany.companyHash ? (
+                                <code className="text-xs text-gray-700 select-all">{newCompany.companyHash}</code>
+                            ) : (
+                                <div className="text-xs text-amber-600 font-medium">Salve a empresa para gerar a hash.</div>
+                            )}
                         </div>
-                        <button 
-                            type="button" 
-                            onClick={() => {
-                                navigator.clipboard.writeText(newCompany.companyHash || '');
-                                alert('Hash copiado!');
-                            }} 
-                            className="bg-white border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-100 flex items-center gap-2 text-xs text-gray-700 transition"
-                            title="Copiar Hash"
-                        >
-                            <Copy className="w-3 h-3" /> Copiar
-                        </button>
+                        {newCompany.companyHash && (
+                            <button 
+                                type="button" 
+                                onClick={() => {
+                                    navigator.clipboard.writeText(newCompany.companyHash || '');
+                                    alert('Hash copiado!');
+                                }} 
+                                className="bg-white border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-100 flex items-center gap-2 text-xs text-gray-700 transition"
+                                title="Copiar Hash"
+                            >
+                                <Copy className="w-3 h-3" /> Copiar
+                            </button>
+                        )}
                     </div>
                 )}
 
-                <div className="flex justify-end gap-3 mt-6">
+                <div className="flex justify-end gap-3 pt-2 mt-4 shrink-0">
                     <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>
                     <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Salvar</button>
                 </div>
