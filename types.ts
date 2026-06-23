@@ -8,6 +8,7 @@ export interface Company {
   whatsapp: string;
   categories?: string[];
   observation?: string;
+  companyHash?: string;
 }
 
 export enum TaskStatus {
@@ -130,4 +131,5 @@ export interface UserSettings {
   aiEnabled?: boolean; // Ativar/Desativar IA
   companyCategories?: CompanyCategory[];
   waKanban?: WaKanbanState;
+  clientPortalWebhookUrl?: string; // Webhook para envio dos arquivos ao portal
 }

@@ -457,17 +457,53 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
     fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, "base64"));
     db.prepare(`UPDATE sitfis_consultas SET status = 'CONCLUIDO', pdf_path = ?, concluido_at = datetime('now') WHERE id = ?`).run(pdfPath, consultaId);
 
+    let pendenciesData = null;
     log("Iniciando análise por IA automática do PDF baixado do SERPRO...");
     try {
        let extracted = fastParsePdfForNegativeCert(pdfPath);
        if (!extracted) extracted = await analyzePdfWithAI(pdfPath);
        
+       pendenciesData = extracted.pendencies;
+
        const finalCompanyName = extracted.companyName || config.cnpj_contratante;
        db.prepare(`INSERT INTO company_pendencies (companyId, docNumber, companyName, filename, extractedData, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
          .run(clienteId, extracted.cnpj || cnpjCliente, finalCompanyName, pdfFilename, JSON.stringify(extracted.pendencies), new Date().toISOString());
        log("Análise do PDF automática concluída com sucesso.");
     } catch(e) {
        log("Erro na análise automática do SitFis: " + e.message);
+    }
+    
+    // Notifica via Webhook do Portal do Cliente
+    try {
+        const settingsRow = db.prepare("SELECT settings FROM user_settings WHERE id = 1").get();
+        if (settingsRow) {
+            const settings = JSON.parse(settingsRow.settings);
+            if (settings.clientPortalWebhookUrl) {
+                const companyRow = db.prepare("SELECT companyHash FROM companies WHERE id = ?").get(clienteId);
+                if (companyRow && companyRow.companyHash) {
+                    const todayDate = new Date().toISOString().split('T')[0]; // Data de hoje como vencimento genérico
+                    
+                    const payload = {
+                        hash_empresa: companyRow.companyHash,
+                        vencimento: todayDate,
+                        categoria: 'SITFIS_RECEITA',
+                        nome_arquivo: pdfFilename,
+                        dados_extraidos: pendenciesData
+                    };
+                    
+                    fetch(settings.clientPortalWebhookUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).then(r => {
+                        if (!r.ok) log(`Webhook SitFis POST falhou com status ${r.status}`);
+                        else log("Webhook SitFis notificado para hash " + companyRow.companyHash);
+                    }).catch(e => log("Webhook SitFis falhou: " + e.message));
+                }
+            }
+        }
+    } catch(err) {
+        log("Erro ao tentar enviar Webhook do SitFis: " + err.message);
     }
 
     log("Concluído.");

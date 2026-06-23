@@ -65,7 +65,8 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
         email: company.email,
         whatsapp: company.whatsapp,
         categories: company.categories || [],
-        observation: company.observation || ''
+        observation: company.observation || '',
+        companyHash: company.companyHash || ''
     });
     setEditingId(company.id);
     setIsModalOpen(true);
@@ -452,6 +453,26 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
                       placeholder="Adicione notas sobre esta empresa..."
                    />
                 </div>
+
+                {editingId && newCompany.companyHash && (
+                    <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg flex justify-between items-center">
+                        <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase">Hash de Integração (Portal)</div>
+                            <code className="text-xs text-gray-700 select-all">{newCompany.companyHash}</code>
+                        </div>
+                        <button 
+                            type="button" 
+                            onClick={() => {
+                                navigator.clipboard.writeText(newCompany.companyHash || '');
+                                alert('Hash copiado!');
+                            }} 
+                            className="bg-white border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-100 flex items-center gap-2 text-xs text-gray-700 transition"
+                            title="Copiar Hash"
+                        >
+                            <Copy className="w-3 h-3" /> Copiar
+                        </button>
+                    </div>
+                )}
 
                 <div className="flex justify-end gap-3 mt-6">
                     <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>

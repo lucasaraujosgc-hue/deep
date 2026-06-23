@@ -22,6 +22,7 @@ type TabId =
   | 'due_dates'
   | 'daily'
   | 'company_categories'
+  | 'webhook'
   | 'serpro';
 
 // ─── Tipos do formulário SERPRO ───────────────────────────────────────────────
@@ -327,6 +328,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
           {tabBtn('due_dates', 'Vencimentos', <CalendarDays className="w-4 h-4" />)}
           {tabBtn('company_categories', 'Tags Empresas', <Building2 className="w-4 h-4" />)}
           {tabBtn('daily', 'Resumo Diário', <Clock className="w-4 h-4" />)}
+          {tabBtn('webhook', 'Portal do Cliente', <Globe className="w-4 h-4" />)}
           {tabBtn('serpro', 'Integra Contador', <ShieldCheck className="w-4 h-4" />)}
         </div>
 
@@ -659,6 +661,50 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                   {loadingTest ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                   Disparar Resumo Agora (Teste)
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Webhook / Portal do Cliente ─────────────────────────────────────── */}
+          {activeTab === 'webhook' && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-2xl">
+              <div className="mb-6">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-purple-600" /> Portal do Cliente (Webhook)
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Integre com o Portal do Cliente de forma unificada. Enviaremos um POST automático toda vez que um documento manual for salvo ou quando um relatório SitFis for gerado pela IA.
+                </p>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 space-y-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">URL do Webhook (Endpoint)</label>
+                  <input
+                    type="url"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="https://sua-api.com/webhook/receber-documento"
+                    value={formData.clientPortalWebhookUrl || ''}
+                    onChange={(e) => setFormData({ ...formData, clientPortalWebhookUrl: e.target.value })}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ao processar um relatório SitFis gerado via Integra Contador (Serpro), a categoria retornada será <strong>SITFIS_RECEITA</strong> e enviaremos as pendências (dados extraídos pela IA), em vez do PDF em base64.
+                  </p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded text-sm text-purple-800 border border-purple-100 font-mono text-xs overflow-x-auto whitespace-pre">
+                    <strong>Payload Enviado:</strong><br/>
+                    {`{
+  "hash_empresa": "uuid-da-empresa", // Hash de vinculação
+  "vencimento": "DD/MM/YYYY", // Vencimento (ou data atual para o SitFis)
+  "categoria": "SITFIS_RECEITA", // Ou a categoria do documento inserido
+  "nome_arquivo": "sitfis_1_1234.pdf",
+  // Se for documento comum:
+  "arquivo_base64": "JVBERi0xLjQK...", // Base64 do PDF
+  // Se for categoria SITFIS_RECEITA, enviamos as análises da IA:
+  "dados_extraidos": [
+      { "orgao": "RFB", "status": "PENDENTE", "descricao": "Ausência de Declaração..." }
+  ]
+}`}
+                </div>
               </div>
             </div>
           )}

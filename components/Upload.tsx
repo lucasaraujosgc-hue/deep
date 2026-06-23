@@ -173,6 +173,16 @@ const Upload: React.FC<UploadProps> = ({ preFillData, onUploadSuccess, userSetti
     try {
         const uploadedFilesWithServerNames = await Promise.all(files.map(async (f) => {
             const res = await api.uploadFile(f.file);
+            
+            // Post webhook silently
+            api.notifyWebhook({
+                serverFilename: res.filename,
+                originalName: f.name,
+                dueDate: f.dueDate,
+                category: f.category,
+                companyId: selectedCompanyId
+            }).catch(e => console.error("Webhook notification error", e));
+
             return {
                 ...f,
                 serverFilename: res.filename

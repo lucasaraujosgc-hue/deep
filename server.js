@@ -263,6 +263,7 @@ export const getDb = (username) => {
     safeAlter("ALTER TABLE whatsapp_messages ADD COLUMN contactName TEXT");
     safeAlter("ALTER TABLE companies ADD COLUMN categories TEXT");
     safeAlter("ALTER TABLE companies ADD COLUMN observation TEXT");
+    safeAlter("ALTER TABLE companies ADD COLUMN companyHash TEXT");
     safeAlter("ALTER TABLE scheduled_messages ADD COLUMN documentsPayload TEXT");
     
     const tasksHasCreatedAt = db.prepare("PRAGMA table_info(tasks)").all().some(col => col.name === 'createdAt');
@@ -1846,6 +1847,56 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     res.json({ filename: req.file.filename, originalName: req.file.originalname });
 });
 
+app.post('/api/notify-webhook', async (req, res) => {
+    try {
+        const { serverFilename, originalName, dueDate, category, companyId } = req.body;
+        if (!serverFilename || !companyId) return res.json({ success: true, reason: 'missing data' });
+
+        const db = getDb(req.user);
+        const settingsRow = db.prepare("SELECT settings FROM user_settings WHERE id = 1").get();
+        if (!settingsRow) return res.json({ success: true, reason: 'no settings' });
+        
+        const settings = JSON.parse(settingsRow.settings);
+        if (!settings.clientPortalWebhookUrl) return res.json({ success: true, reason: 'no webhook url' });
+
+        const companyRow = db.prepare("SELECT companyHash FROM companies WHERE id = ?").get(companyId);
+        if (!companyRow || !companyRow.companyHash) return res.json({ success: true, reason: 'no company hash' });
+
+        const filePath = path.join(UPLOADS_DIR, serverFilename);
+        if (!fs.existsSync(filePath)) {
+            return res.json({ success: false, reason: 'file not found' });
+        }
+
+        const fileBuffer = fs.readFileSync(filePath);
+        const pdfBase64 = fileBuffer.toString('base64');
+
+        const payload = {
+            hash_empresa: companyRow.companyHash,
+            vencimento: dueDate || '',
+            categoria: category || '',
+            nome_arquivo: originalName || serverFilename,
+            arquivo_base64: pdfBase64
+        };
+
+        const result = await fetch(settings.clientPortalWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!result.ok) {
+            log(`Webhook POST falhou com status ${result.status}`);
+        } else {
+            log(`Webhook notificado para hash ${companyRow.companyHash}`);
+        }
+
+        res.json({ success: true });
+    } catch(e) {
+        log('Erro no webhook: ', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/settings', (req, res) => {
     const db = getDb(req.user);
     if (!db) return res.status(500).json({ error: 'Database error' });
@@ -1894,20 +1945,22 @@ app.get('/api/companies', (req, res) => {
 });
 
 app.post('/api/companies', (req, res) => {
-    const { id, name, docNumber, type, email, whatsapp, categories, observation } = req.body;
+    const { id, name, docNumber, type, email, whatsapp, categories, observation, companyHash } = req.body;
     const db = getDb(req.user);
     if (!db) return res.status(500).json({ error: 'Database error' });
     
     const catStr = JSON.stringify(categories || []);
+    const crypto = require('crypto');
+    const hashToSave = companyHash || crypto.randomUUID();
 
     try {
         if (id) {
-            db.prepare(`UPDATE companies SET name=?, docNumber=?, type=?, email=?, whatsapp=?, categories=?, observation=? WHERE id=?`)
-                .run(name, docNumber, type, email, whatsapp, catStr, observation || '', id);
+            db.prepare(`UPDATE companies SET name=?, docNumber=?, type=?, email=?, whatsapp=?, categories=?, observation=?, companyHash=COALESCE(companyHash, ?) WHERE id=?`)
+                .run(name, docNumber, type, email, whatsapp, catStr, observation || '', hashToSave, id);
             res.json({success: true, id});
         } else {
-            const result = db.prepare(`INSERT INTO companies (name, docNumber, type, email, whatsapp, categories, observation) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-                .run(name, docNumber, type, email, whatsapp, catStr, observation || '');
+            const result = db.prepare(`INSERT INTO companies (name, docNumber, type, email, whatsapp, categories, observation, companyHash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(name, docNumber, type, email, whatsapp, catStr, observation || '', hashToSave);
             res.json({success: true, id: result.lastInsertRowid});
         }
     } catch (err) {

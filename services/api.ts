@@ -142,6 +142,18 @@ export const api = {
     return handleResponse(res);
   },
 
+  notifyWebhook: async (payload: { serverFilename: string, originalName: string, dueDate: string, category: string, companyId: string | number }): Promise<any> => {
+    const res = await fetch(`${API_URL}/notify-webhook`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+             ...getAuthHeader()
+        },
+        body: JSON.stringify(payload)
+    });
+    return handleResponse(res);
+  },
+
   // Send Documents Real
   sendDocuments: async (payload: { documents: any[], subject: string, messageBody: string, channels: any, emailSignature?: string, whatsappTemplate?: string }): Promise<any> => {
     const res = await fetch(`${API_URL}/send-documents`, {
