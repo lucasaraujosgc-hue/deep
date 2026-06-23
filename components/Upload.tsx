@@ -180,7 +180,8 @@ const Upload: React.FC<UploadProps> = ({ preFillData, onUploadSuccess, userSetti
                 originalName: f.name,
                 dueDate: f.dueDate,
                 category: f.category,
-                companyId: selectedCompanyId
+                companyId: selectedCompanyId,
+                competence: competence
             }).catch(e => console.error("Webhook notification error", e));
 
             return {

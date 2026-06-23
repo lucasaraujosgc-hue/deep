@@ -695,6 +695,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                     {`{
   "hash_empresa": "uuid-da-empresa", // Hash de vinculação
   "vencimento": "DD/MM/YYYY", // Vencimento (ou data atual para o SitFis)
+  "competencia": "MM/YYYY", // Competência do documento ou SitFis
   "categoria": "SITFIS_RECEITA", // Ou a categoria do documento inserido
   "nome_arquivo": "sitfis_1_1234.pdf",
   // Se for documento comum:

@@ -1849,7 +1849,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 
 app.post('/api/notify-webhook', async (req, res) => {
     try {
-        const { serverFilename, originalName, dueDate, category, companyId } = req.body;
+        const { serverFilename, originalName, dueDate, category, companyId, competence } = req.body;
         if (!serverFilename || !companyId) return res.json({ success: true, reason: 'missing data' });
 
         const db = getDb(req.user);
@@ -1873,6 +1873,7 @@ app.post('/api/notify-webhook', async (req, res) => {
         const payload = {
             hash_empresa: companyRow.companyHash,
             vencimento: dueDate || '',
+            competencia: competence || '',
             categoria: category || '',
             nome_arquivo: originalName || serverFilename,
             arquivo_base64: pdfBase64

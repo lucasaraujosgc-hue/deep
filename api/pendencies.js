@@ -483,9 +483,15 @@ async function executarSitfis(db, config, clienteId, usuarioId, cnpjCliente) {
                 if (companyRow && companyRow.companyHash) {
                     const todayDate = new Date().toISOString().split('T')[0]; // Data de hoje como vencimento genérico
                     
+                    const now = new Date();
+                    const compMonth = String(now.getMonth() + 1).padStart(2, '0');
+                    const compYear = now.getFullYear();
+                    const competenciaAtual = `${compMonth}/${compYear}`;
+
                     const payload = {
                         hash_empresa: companyRow.companyHash,
                         vencimento: todayDate,
+                        competencia: competenciaAtual,
                         categoria: 'SITFIS_RECEITA',
                         nome_arquivo: pdfFilename,
                         dados_extraidos: pendenciesData

@@ -142,7 +142,7 @@ export const api = {
     return handleResponse(res);
   },
 
-  notifyWebhook: async (payload: { serverFilename: string, originalName: string, dueDate: string, category: string, companyId: string | number }): Promise<any> => {
+  notifyWebhook: async (payload: { serverFilename: string, originalName: string, dueDate: string, category: string, companyId: string | number, competence?: string }): Promise<any> => {
     const res = await fetch(`${API_URL}/notify-webhook`, {
         method: 'POST',
         headers: {
