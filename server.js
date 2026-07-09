@@ -2018,7 +2018,7 @@ app.get('/api/tasks/sync', async (req, res) => {
             console.error("Google tasks sync error:", googleErr);
         }
         
-        res.json(db.prepare('SELECT * FROM tasks ORDER BY CASE WHEN status = "concluida" THEN 1 ELSE 0 END, dueDate ASC, id DESC').all());
+        res.json(db.prepare(`SELECT * FROM tasks ORDER BY CASE WHEN status = 'concluida' THEN 1 ELSE 0 END, dueDate ASC, id DESC`).all());
     } catch (err) {
         console.error("/api/tasks/sync error:", err);
         res.json([]);
