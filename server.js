@@ -2058,8 +2058,33 @@ app.post('/api/tasks', async (req, res) => {
             }
             res.json({ success: true, id: t.id });
         } else {
-            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null);
+            let gTaskId = null;
+            if (process.env.GOOGLE_CLIENT_ID) {
+                try {
+                    const token = await getGoogleAccessToken();
+                    let dt = t.dueDate;
+                    if (dt && dt.includes('T')) {} else if (dt) { dt = dt + 'T00:00:00.000Z'; }
+                    const gTaskReq = {
+                        title: t.title,
+                        notes: t.description || '',
+                    };
+                    if (dt) {
+                        gTaskReq.due = new Date(dt).toISOString();
+                    }
+                    const resG = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(gTaskReq)
+                    });
+                    const dataG = await resG.json();
+                    if (dataG.id) {
+                        gTaskId = dataG.id;
+                    }
+                } catch(e) { console.error('Failed to create Google Task:', e); }
+            }
+
+            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId);
 
             res.json({ success: true, id: result.lastInsertRowid });
         }

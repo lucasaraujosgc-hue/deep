@@ -67,6 +67,17 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [isTasksDrawerOpen, setIsTasksDrawerOpen] = useState(false);
   const [dashTasks, setDashTasks] = useState<any[]>([]);
   const [dashTasksLoading, setDashTasksLoading] = useState(false);
+  
+  const [taskFilterDate, setTaskFilterDate] = useState('');
+  const [taskFilterPriority, setTaskFilterPriority] = useState('');
+  const [taskFilterTime, setTaskFilterTime] = useState('');
+  const [taskFilterName, setTaskFilterName] = useState('');
+
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskNotes, setNewTaskNotes] = useState('');
+  const [newTaskDue, setNewTaskDue] = useState('');
+  const [newTaskTime, setNewTaskTime] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
@@ -116,6 +127,36 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
     } finally {
         setDashTasksLoading(false);
     }
+  };
+
+  const handleCreateTask = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newTaskTitle) return;
+      setDashTasksLoading(true);
+      try {
+          const newTask = {
+              title: newTaskTitle,
+              description: newTaskNotes,
+              dueDate: newTaskDue,
+              estimatedTime: newTaskTime,
+              status: 'pendente' as const,
+              priority: 'media' as const,
+              color: 'bg-slate-100'
+          };
+          const res = await api.saveTask(newTask);
+          if (res.success) {
+              setNewTaskTitle('');
+              setNewTaskNotes('');
+              setNewTaskDue('');
+              setNewTaskTime('');
+              setShowAddTask(false);
+              loadDashTasks(); 
+          }
+      } catch (err) {
+          console.error(err);
+      } finally {
+          setDashTasksLoading(false);
+      }
   };
 
   useEffect(() => {
@@ -576,6 +617,15 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   if (loading && waChats.length === 0) {
       return <div className="flex justify-center p-10"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
   }
+
+  const filteredDashTasks = dashTasks.filter(t => {
+      let match = true;
+      if (taskFilterName && !t.title.toLowerCase().includes(taskFilterName.toLowerCase())) match = false;
+      if (taskFilterDate && t.dueDate !== taskFilterDate) match = false;
+      if (taskFilterPriority && t.priority !== taskFilterPriority) match = false;
+      if (taskFilterTime && (!t.estimatedTime || !t.estimatedTime.toLowerCase().includes(taskFilterTime.toLowerCase()))) match = false;
+      return match;
+  });
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 73px)', overflow: 'hidden' }}>
@@ -1241,6 +1291,63 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           </button>
                       </div>
                   </div>
+
+                  {/* Filtros e Ações */}
+                  <div className="px-4 py-3 bg-white border-b border-gray-100 flex flex-col gap-3 shrink-0 shadow-sm z-10 relative">
+                      <div className="flex justify-between items-center">
+                          <h3 className="text-sm font-semibold text-gray-700">Filtros</h3>
+                          <button 
+                              onClick={() => setShowAddTask(!showAddTask)}
+                              className={`flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md transition-colors ${showAddTask ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
+                          >
+                              {showAddTask ? <><X className="w-3.5 h-3.5" /> Cancelar</> : <><Plus className="w-3.5 h-3.5" /> Nova Tarefa</>}
+                          </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                          <input type="text" placeholder="Buscar por título..." value={taskFilterName} onChange={e => setTaskFilterName(e.target.value)} className="col-span-2 text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
+                          <input type="date" value={taskFilterDate} onChange={e => setTaskFilterDate(e.target.value)} className="text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
+                          <select value={taskFilterPriority} onChange={e => setTaskFilterPriority(e.target.value)} className="text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300">
+                              <option value="">Todas as prioridades</option>
+                              <option value="baixa">Baixa</option>
+                              <option value="media">Média</option>
+                              <option value="alta">Alta</option>
+                          </select>
+                          <input type="text" placeholder="Tempo ex: 30m" value={taskFilterTime} onChange={e => setTaskFilterTime(e.target.value)} className="col-span-2 text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
+                      </div>
+                  </div>
+
+                  {/* Form de Nova Tarefa */}
+                  {showAddTask && (
+                      <form onSubmit={handleCreateTask} className="p-4 bg-purple-50/50 border-b border-purple-100 shrink-0">
+                          <div className="space-y-3">
+                              <div>
+                                  <label className="text-xs font-medium text-gray-700 mb-1 block">Título da Tarefa</label>
+                                  <input type="text" required value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400" placeholder="O que precisa ser feito?" />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-medium text-gray-700 mb-1 block">Detalhes (Opcional)</label>
+                                  <textarea value={newTaskNotes} onChange={e => setNewTaskNotes(e.target.value)} rows={2} className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400 resize-none" placeholder="Adicione detalhes..."></textarea>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                      <label className="text-xs font-medium text-gray-700 mb-1 block">Data de Conclusão</label>
+                                      <input type="date" value={newTaskDue} onChange={e => setNewTaskDue(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400" />
+                                  </div>
+                                  <div>
+                                      <label className="text-xs font-medium text-gray-700 mb-1 block">Tempo Estimado</label>
+                                      <input type="text" value={newTaskTime} onChange={e => setNewTaskTime(e.target.value)} placeholder="Ex: 30m, 2h" className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400" />
+                                  </div>
+                              </div>
+                              <div className="pt-2">
+                                  <button type="submit" disabled={dashTasksLoading || !newTaskTitle} className="w-full bg-purple-600 text-white font-medium p-2 rounded-lg hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center">
+                                      {dashTasksLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Adicionar Tarefa'}
+                                  </button>
+                              </div>
+                          </div>
+                      </form>
+                  )}
+
                   <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
                       {dashTasksLoading && dashTasks.length === 0 ? (
                           <div className="flex items-center justify-center p-8 text-gray-400">
@@ -1250,8 +1357,12 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           <div className="text-center p-8 text-gray-400 text-sm">
                               Nenhuma tarefa encontrada.<br/>Clique em sincronizar para buscar do Google Tasks.
                           </div>
+                      ) : filteredDashTasks.length === 0 ? (
+                          <div className="text-center p-8 text-gray-400 text-sm">
+                              Nenhuma tarefa corresponde aos filtros.
+                          </div>
                       ) : (
-                          dashTasks.map(t => (
+                          filteredDashTasks.map(t => (
                               <div key={t.id} className={`p-3 bg-white border ${t.status === 'concluida' ? 'border-gray-200 opacity-60' : 'border-gray-300'} rounded-xl shadow-sm flex flex-col gap-2`}>
                                   <div className="flex items-start justify-between gap-2">
                                       <h3 className={`font-medium text-sm ${t.status === 'concluida' ? 'line-through text-gray-500' : 'text-gray-800'}`}>
