@@ -2001,7 +2001,7 @@ app.get('/api/tasks/sync', async (req, res) => {
                 const tokenData = await tokenResponse.json();
                 if (tokenData.access_token) {
                     const token = tokenData.access_token;
-                    const tasksResponse = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+                    const tasksResponse = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showHidden=true&showCompleted=true', {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
                     const tasksData = await tasksResponse.json();
@@ -2043,7 +2043,7 @@ app.get('/api/tasks', (req, res) => {
     }
 });
 
-app.post('/api/tasks', (req, res) => {
+app.post('/api/tasks', async (req, res) => {
     const t = req.body;
     const db = getDb(req.user);
     const today = new Date().toISOString().split('T')[0];
@@ -2051,8 +2051,21 @@ app.post('/api/tasks', (req, res) => {
 
     try {
         if (t.id && t.id < 1000000000000) {
+            const oldTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.id);
             db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=? WHERE id=?`)
                 .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.id);
+            
+            if (oldTask && oldTask.googleTaskId && process.env.GOOGLE_CLIENT_ID) {
+                try {
+                    const token = await getGoogleAccessToken();
+                    const statusStr = t.status === 'concluida' ? 'completed' : 'needsAction';
+                    await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${oldTask.googleTaskId}`, {
+                        method: 'PATCH',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: statusStr, title: t.title, notes: t.description })
+                    });
+                } catch(e) { console.error('Failed to update Google Task:', e); }
+            }
             res.json({ success: true, id: t.id });
         } else {
             const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -2065,9 +2078,23 @@ app.post('/api/tasks', (req, res) => {
     }
 });
 
-app.delete('/api/tasks/:id', (req, res) => {
+app.delete('/api/tasks/:id', async (req, res) => {
     try {
-        getDb(req.user).prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+        const db = getDb(req.user);
+        const oldTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(req.params.id);
+        
+        db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+        
+        if (oldTask && oldTask.googleTaskId && process.env.GOOGLE_CLIENT_ID) {
+            try {
+                const token = await getGoogleAccessToken();
+                await fetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${oldTask.googleTaskId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            } catch(e) { console.error('Failed to delete Google Task:', e); }
+        }
+        
         res.json({ success: true });
     } catch (err) {
         res.json({ success: false });

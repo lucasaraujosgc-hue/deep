@@ -1257,7 +1257,32 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       <h3 className={`font-medium text-sm ${t.status === 'concluida' ? 'line-through text-gray-500' : 'text-gray-800'}`}>
                                           {t.title}
                                       </h3>
-                                      {t.status === 'concluida' && <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />}
+                                      <div className="flex items-center gap-1 shrink-0">
+                                          <button 
+                                              onClick={async () => {
+                                                  const newStatus = t.status === 'concluida' ? 'pendente' : 'concluida';
+                                                  const updated = {...t, status: newStatus};
+                                                  setDashTasks(prev => prev.map(pt => pt.id === t.id ? updated : pt));
+                                                  await api.saveTask(updated);
+                                              }}
+                                              className={`p-1 rounded-md transition ${t.status === 'concluida' ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'}`}
+                                              title={t.status === 'concluida' ? 'Marcar como pendente' : 'Marcar como concluída'}
+                                          >
+                                              <CheckCircle2 className="w-4 h-4" />
+                                          </button>
+                                          <button 
+                                              onClick={async () => {
+                                                  if(confirm('Tem certeza que deseja excluir esta tarefa?')) {
+                                                      setDashTasks(prev => prev.filter(pt => pt.id !== t.id));
+                                                      await api.deleteTask(t.id);
+                                                  }
+                                              }}
+                                              className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition"
+                                              title="Excluir tarefa"
+                                          >
+                                              <Trash2 className="w-4 h-4" />
+                                          </button>
+                                      </div>
                                   </div>
                                   {t.description && (
                                       <p className="text-xs text-gray-500 line-clamp-2">{t.description}</p>
