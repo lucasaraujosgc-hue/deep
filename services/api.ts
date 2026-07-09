@@ -96,6 +96,11 @@ export const api = {
   },
 
   // Tasks (Kanban)
+  syncTasks: async (): Promise<Task[]> => {
+    const res = await fetch(`${API_URL}/tasks/sync`, { headers: getAuthHeader() });
+    return handleResponse(res);
+  },
+
   getTasks: async (): Promise<Task[]> => {
     const res = await fetch(`${API_URL}/tasks`, { headers: getAuthHeader() });
     return handleResponse(res);

@@ -272,6 +272,8 @@ export const getDb = (username) => {
         db.exec("ALTER TABLE tasks ADD COLUMN createdAt TEXT");
         db.prepare("UPDATE tasks SET createdAt = ?").run(today);
     }
+    safeAlter("ALTER TABLE tasks ADD COLUMN googleTaskId TEXT");
+    safeAlter("ALTER TABLE tasks ADD COLUMN estimatedTime TEXT");
 
     dbInstances[username] = db;
     return db;
@@ -1980,6 +1982,59 @@ app.delete('/api/companies/:id', (req, res) => {
     }
 });
 
+app.get('/api/tasks/sync', async (req, res) => {
+    try {
+        const db = getDb(req.user);
+        
+        if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
+            try {
+                const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        client_id: process.env.GOOGLE_CLIENT_ID,
+                        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+                        refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+                        grant_type: 'refresh_token'
+                    })
+                });
+                const tokenData = await tokenResponse.json();
+                if (tokenData.access_token) {
+                    const token = tokenData.access_token;
+                    const tasksResponse = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const tasksData = await tasksResponse.json();
+                    
+                    if (tasksData.items && Array.isArray(tasksData.items)) {
+                        const today = new Date().toISOString().split('T')[0];
+                        for (const gTask of tasksData.items) {
+                            const existing = db.prepare('SELECT id FROM tasks WHERE googleTaskId = ?').get(gTask.id);
+                            if (!existing) {
+                                // insert new task
+                                const status = gTask.status === 'completed' ? 'concluida' : 'pendente';
+                                db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, googleTaskId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+                                    .run(gTask.title, gTask.notes || '', status, 'media', 'bg-slate-100', gTask.due ? gTask.due.split('T')[0] : '', gTask.id, today);
+                            } else {
+                                // update if status changed on google maybe?
+                                if (gTask.status === 'completed') {
+                                    db.prepare("UPDATE tasks SET status = 'concluida' WHERE googleTaskId = ? AND status != 'concluida'").run(gTask.id);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (googleErr) {
+                console.error("Google tasks sync error", googleErr);
+            }
+        }
+        
+        res.json(db.prepare('SELECT * FROM tasks ORDER BY CASE WHEN status = "concluida" THEN 1 ELSE 0 END, dueDate ASC, id DESC').all());
+    } catch (err) {
+        res.json([]);
+    }
+});
+
 app.get('/api/tasks', (req, res) => {
     try {
         res.json(getDb(req.user).prepare('SELECT * FROM tasks').all());
@@ -1996,12 +2051,12 @@ app.post('/api/tasks', (req, res) => {
 
     try {
         if (t.id && t.id < 1000000000000) {
-            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=? WHERE id=?`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.id);
+            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=? WHERE id=?`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.id);
             res.json({ success: true, id: t.id });
         } else {
-            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt);
+            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null);
 
             res.json({ success: true, id: result.lastInsertRowid });
         }

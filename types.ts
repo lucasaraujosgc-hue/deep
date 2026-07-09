@@ -38,6 +38,8 @@ export interface Task {
   dayOfWeek?: 'segunda' | 'terca' | 'quarta' | 'quinta' | 'sexta' | 'sabado' | 'domingo';
   recurrenceDate?: string;
   targetCompanyType?: 'normal' | 'mei'; 
+  googleTaskId?: string;
+  estimatedTime?: string;
 }
 
 export interface Document {

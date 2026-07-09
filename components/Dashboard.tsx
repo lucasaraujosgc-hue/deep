@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Building2, CheckCircle2, Clock, AlertCircle, Loader2, Bot, Power, User, Trash2,
   Plus, MoreHorizontal, MessageCircle, Settings, X, Search, Phone, Send, Mic, 
-  Paperclip, Music, FileText, Image as ImageIcon, RefreshCw, History, Download
+  Paperclip, Music, FileText, Image as ImageIcon, RefreshCw, History, Download, Calendar
 } from 'lucide-react';
 import { UserSettings, WaKanbanState, WaKanbanColumn, WaKanbanTag, WaKanbanCard } from '../types';
 import { api } from '../services/api';
@@ -64,6 +64,9 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState<Record<string, boolean>>({});
   const [isDragging, setIsDragging] = useState(false);
+  const [isTasksDrawerOpen, setIsTasksDrawerOpen] = useState(false);
+  const [dashTasks, setDashTasks] = useState<any[]>([]);
+  const [dashTasksLoading, setDashTasksLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
@@ -90,6 +93,36 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       setLoading(false);
     }
   };
+
+  const loadDashTasks = async () => {
+    setDashTasksLoading(true);
+    try {
+        const t = await api.getTasks();
+        setDashTasks(t);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setDashTasksLoading(false);
+    }
+  };
+
+  const handleSyncTasks = async () => {
+    setDashTasksLoading(true);
+    try {
+        const t = await api.syncTasks();
+        setDashTasks(t);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setDashTasksLoading(false);
+    }
+  };
+
+  useEffect(() => {
+      if (isTasksDrawerOpen) {
+          loadDashTasks();
+      }
+  }, [isTasksDrawerOpen]);
 
   const activeChatRef = useRef(activeChat);
   useEffect(() => {
@@ -593,6 +626,14 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
              <span
                className={`w-2 h-2 rounded-full ${aiEnabled ? 'bg-green-500' : 'bg-gray-400'}`}
              />
+           </button>
+           
+           <button
+             onClick={() => setIsTasksDrawerOpen(true)}
+             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors text-xs font-semibold ml-auto"
+           >
+             <CheckCircle2 className="w-4 h-4" />
+             <span>Tarefas</span>
            </button>
       </div>
 
@@ -1177,6 +1218,93 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                   {expandedMediaType === 'document' && (
                       <iframe src={expandedMediaUrl} className="w-[80vw] h-[80vh] bg-white rounded-lg" title="Document Viewer" />
                   )}
+              </div>
+          </div>
+      )}
+
+      {/* Drawer Lateral de Tarefas */}
+      {isTasksDrawerOpen && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setIsTasksDrawerOpen(false)}></div>
+              <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+                  <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                      <div className="flex items-center gap-2 text-gray-800">
+                          <CheckCircle2 className="w-5 h-5 text-purple-600" />
+                          <h2 className="font-bold">Minhas Tarefas</h2>
+                      </div>
+                      <div className="flex gap-2">
+                          <button onClick={handleSyncTasks} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-md transition" title="Sincronizar com Google">
+                              <RefreshCw className={`w-4 h-4 ${dashTasksLoading ? 'animate-spin' : ''}`} />
+                          </button>
+                          <button onClick={() => setIsTasksDrawerOpen(false)} className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-md">
+                              <X className="w-5 h-5" />
+                          </button>
+                      </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
+                      {dashTasksLoading && dashTasks.length === 0 ? (
+                          <div className="flex items-center justify-center p-8 text-gray-400">
+                              <Loader2 className="w-6 h-6 animate-spin" />
+                          </div>
+                      ) : dashTasks.length === 0 ? (
+                          <div className="text-center p-8 text-gray-400 text-sm">
+                              Nenhuma tarefa encontrada.<br/>Clique em sincronizar para buscar do Google Tasks.
+                          </div>
+                      ) : (
+                          dashTasks.map(t => (
+                              <div key={t.id} className={`p-3 bg-white border ${t.status === 'concluida' ? 'border-gray-200 opacity-60' : 'border-gray-300'} rounded-xl shadow-sm flex flex-col gap-2`}>
+                                  <div className="flex items-start justify-between gap-2">
+                                      <h3 className={`font-medium text-sm ${t.status === 'concluida' ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                                          {t.title}
+                                      </h3>
+                                      {t.status === 'concluida' && <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />}
+                                  </div>
+                                  {t.description && (
+                                      <p className="text-xs text-gray-500 line-clamp-2">{t.description}</p>
+                                  )}
+                                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                                      {t.dueDate && (
+                                          <span className="text-[10px] font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                              <Calendar className="w-3 h-3" /> {t.dueDate}
+                                          </span>
+                                      )}
+                                      <select 
+                                          value={t.priority || 'baixa'} 
+                                          onChange={async (e) => {
+                                              const newP = e.target.value;
+                                              const updated = {...t, priority: newP};
+                                              setDashTasks(prev => prev.map(pt => pt.id === t.id ? updated : pt));
+                                              await api.saveTask(updated);
+                                          }}
+                                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full outline-none cursor-pointer border ${t.priority==='alta'?'bg-red-50 text-red-700 border-red-200':t.priority==='media'?'bg-yellow-50 text-yellow-700 border-yellow-200':'bg-blue-50 text-blue-700 border-blue-200'}`}
+                                      >
+                                          <option value="baixa">🔵 Baixa</option>
+                                          <option value="media">🟡 Média</option>
+                                          <option value="alta">🔴 Alta</option>
+                                      </select>
+                                      
+                                      <div className="flex items-center gap-1 border rounded-full px-2 py-0.5 bg-gray-50 ml-auto">
+                                          <Clock className="w-3 h-3 text-gray-400" />
+                                          <input 
+                                              type="text" 
+                                              placeholder="Ex: 30m, 2h" 
+                                              defaultValue={t.estimatedTime || ''}
+                                              onBlur={async (e) => {
+                                                  const newT = e.target.value;
+                                                  if (newT !== t.estimatedTime) {
+                                                      const updated = {...t, estimatedTime: newT};
+                                                      setDashTasks(prev => prev.map(pt => pt.id === t.id ? updated : pt));
+                                                      await api.saveTask(updated);
+                                                  }
+                                              }}
+                                              className="bg-transparent outline-none text-[10px] w-12 text-gray-600 placeholder-gray-400"
+                                          />
+                                      </div>
+                                  </div>
+                              </div>
+                          ))
+                      )}
+                  </div>
               </div>
           </div>
       )}
