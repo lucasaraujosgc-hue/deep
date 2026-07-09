@@ -1986,51 +1986,41 @@ app.get('/api/tasks/sync', async (req, res) => {
     try {
         const db = getDb(req.user);
         
-        if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
-            try {
-                const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        client_id: process.env.GOOGLE_CLIENT_ID,
-                        client_secret: process.env.GOOGLE_CLIENT_SECRET,
-                        refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-                        grant_type: 'refresh_token'
-                    })
-                });
-                const tokenData = await tokenResponse.json();
-                if (tokenData.access_token) {
-                    const token = tokenData.access_token;
-                    const tasksResponse = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showHidden=true&showCompleted=true', {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    const tasksData = await tasksResponse.json();
-                    
-                    if (tasksData.items && Array.isArray(tasksData.items)) {
-                        const today = new Date().toISOString().split('T')[0];
-                        for (const gTask of tasksData.items) {
-                            const existing = db.prepare('SELECT id FROM tasks WHERE googleTaskId = ?').get(gTask.id);
-                            if (!existing) {
-                                // insert new task
-                                const status = gTask.status === 'completed' ? 'concluida' : 'pendente';
-                                db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, googleTaskId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-                                    .run(gTask.title, gTask.notes || '', status, 'media', 'bg-slate-100', gTask.due ? gTask.due.split('T')[0] : '', gTask.id, today);
-                            } else {
-                                // update if status changed on google maybe?
-                                if (gTask.status === 'completed') {
-                                    db.prepare("UPDATE tasks SET status = 'concluida' WHERE googleTaskId = ? AND status != 'concluida'").run(gTask.id);
-                                }
-                            }
+        try {
+            const token = await getGoogleAccessToken();
+            const tasksResponse = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showHidden=true&showCompleted=true', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const tasksData = await tasksResponse.json();
+            
+            if (tasksData.items && Array.isArray(tasksData.items)) {
+                const today = new Date().toISOString().split('T')[0];
+                for (const gTask of tasksData.items) {
+                    const existing = db.prepare('SELECT id, status FROM tasks WHERE googleTaskId = ?').get(gTask.id);
+                    if (!existing) {
+                        // insert new task
+                        const status = gTask.status === 'completed' ? 'concluida' : 'pendente';
+                        db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, googleTaskId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+                            .run(gTask.title, gTask.notes || '', status, 'media', 'bg-slate-100', gTask.due ? gTask.due.split('T')[0] : '', gTask.id, today);
+                    } else {
+                        // update if status changed on google maybe?
+                        if (gTask.status === 'completed' && existing.status !== 'concluida') {
+                            db.prepare("UPDATE tasks SET status = 'concluida' WHERE googleTaskId = ?").run(gTask.id);
+                        } else if (gTask.status === 'needsAction' && existing.status === 'concluida') {
+                            db.prepare("UPDATE tasks SET status = 'pendente' WHERE googleTaskId = ?").run(gTask.id);
                         }
                     }
                 }
-            } catch (googleErr) {
-                console.error("Google tasks sync error", googleErr);
+            } else {
+                console.error("Google tasks sync no items or error", tasksData);
             }
+        } catch (googleErr) {
+            console.error("Google tasks sync error:", googleErr);
         }
         
         res.json(db.prepare('SELECT * FROM tasks ORDER BY CASE WHEN status = "concluida" THEN 1 ELSE 0 END, dueDate ASC, id DESC').all());
     } catch (err) {
+        console.error("/api/tasks/sync error:", err);
         res.json([]);
     }
 });
