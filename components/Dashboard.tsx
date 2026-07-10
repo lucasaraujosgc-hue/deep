@@ -72,6 +72,9 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [taskFilterPriority, setTaskFilterPriority] = useState('');
   const [taskFilterTime, setTaskFilterTime] = useState('');
   const [taskFilterName, setTaskFilterName] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [taskSort, setTaskSort] = useState('createdAt_desc');
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
 
   const [showAddTask, setShowAddTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -620,11 +623,32 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 
   const filteredDashTasks = dashTasks.filter(t => {
       let match = true;
+      if (!showCompletedTasks && t.status === 'concluida') match = false;
       if (taskFilterName && !t.title.toLowerCase().includes(taskFilterName.toLowerCase())) match = false;
       if (taskFilterDate && t.dueDate !== taskFilterDate) match = false;
       if (taskFilterPriority && t.priority !== taskFilterPriority) match = false;
       if (taskFilterTime && (!t.estimatedTime || !t.estimatedTime.toLowerCase().includes(taskFilterTime.toLowerCase()))) match = false;
       return match;
+  }).sort((a, b) => {
+      if (taskSort === 'createdAt_desc') {
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      }
+      if (taskSort === 'createdAt_asc') {
+          return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+      }
+      if (taskSort === 'title_asc') {
+          return a.title.localeCompare(b.title);
+      }
+      if (taskSort === 'priority_desc') {
+          const pval = { alta: 3, media: 2, baixa: 1 };
+          return (pval[b.priority as keyof typeof pval] || 0) - (pval[a.priority as keyof typeof pval] || 0);
+      }
+      if (taskSort === 'estimatedTime_asc') {
+          const timeA = parseInt(a.estimatedTime || '0', 10) || 0;
+          const timeB = parseInt(b.estimatedTime || '0', 10) || 0;
+          return timeA - timeB;
+      }
+      return 0;
   });
 
   return (
@@ -1294,8 +1318,15 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 
                   {/* Filtros e Ações */}
                   <div className="px-4 py-3 bg-white border-b border-gray-100 flex flex-col gap-3 shrink-0 shadow-sm z-10 relative">
-                      <div className="flex justify-between items-center">
-                          <h3 className="text-sm font-semibold text-gray-700">Filtros</h3>
+                      <div className="flex justify-between items-center flex-wrap gap-2">
+                          <div className="flex gap-2 items-center">
+                              <button 
+                                  onClick={() => setShowFilters(!showFilters)}
+                                  className={`flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md transition-colors ${showFilters ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                              >
+                                  <Search className="w-3.5 h-3.5" /> {showFilters ? 'Ocultar Filtros' : 'Filtros e Ordenação'}
+                              </button>
+                          </div>
                           <button 
                               onClick={() => setShowAddTask(!showAddTask)}
                               className={`flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md transition-colors ${showAddTask ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
@@ -1304,17 +1335,41 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                           </button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
-                          <input type="text" placeholder="Buscar por título..." value={taskFilterName} onChange={e => setTaskFilterName(e.target.value)} className="col-span-2 text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
-                          <input type="date" value={taskFilterDate} onChange={e => setTaskFilterDate(e.target.value)} className="text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
-                          <select value={taskFilterPriority} onChange={e => setTaskFilterPriority(e.target.value)} className="text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300">
-                              <option value="">Todas as prioridades</option>
-                              <option value="baixa">Baixa</option>
-                              <option value="media">Média</option>
-                              <option value="alta">Alta</option>
-                          </select>
-                          <input type="text" placeholder="Tempo ex: 30m" value={taskFilterTime} onChange={e => setTaskFilterTime(e.target.value)} className="col-span-2 text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
-                      </div>
+                      {showFilters && (
+                          <div className="grid grid-cols-2 gap-2 mt-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                              <div className="col-span-2 flex items-center gap-2 mb-1">
+                                  <input 
+                                      type="checkbox" 
+                                      id="showCompleted" 
+                                      checked={showCompletedTasks} 
+                                      onChange={(e) => setShowCompletedTasks(e.target.checked)}
+                                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                  />
+                                  <label htmlFor="showCompleted" className="text-xs font-medium text-gray-700 cursor-pointer">
+                                      Exibir tarefas concluídas
+                                  </label>
+                              </div>
+                              <input type="text" placeholder="Buscar por título..." value={taskFilterName} onChange={e => setTaskFilterName(e.target.value)} className="col-span-2 text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
+                              <input type="date" value={taskFilterDate} onChange={e => setTaskFilterDate(e.target.value)} className="text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300" />
+                              <select value={taskFilterPriority} onChange={e => setTaskFilterPriority(e.target.value)} className="text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300">
+                                  <option value="">Todas as prioridades</option>
+                                  <option value="baixa">Baixa</option>
+                                  <option value="media">Média</option>
+                                  <option value="alta">Alta</option>
+                              </select>
+                              <div className="col-span-2 relative">
+                                  <input type="number" placeholder="Tempo ex: 30" value={taskFilterTime} onChange={e => setTaskFilterTime(e.target.value)} className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300 pr-8" />
+                                  <span className="absolute right-2 top-1.5 text-xs text-gray-400">min</span>
+                              </div>
+                              <select value={taskSort} onChange={e => setTaskSort(e.target.value)} className="col-span-2 mt-1 text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:border-purple-300 bg-white">
+                                  <option value="createdAt_desc">Data de criação (Mais recentes)</option>
+                                  <option value="createdAt_asc">Data de criação (Mais antigas)</option>
+                                  <option value="title_asc">Nome (A-Z)</option>
+                                  <option value="priority_desc">Prioridade (Alta-Baixa)</option>
+                                  <option value="estimatedTime_asc">Tempo para conclusão (Menor-Maior)</option>
+                              </select>
+                          </div>
+                      )}
                   </div>
 
                   {/* Form de Nova Tarefa */}
@@ -1335,8 +1390,11 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       <input type="date" value={newTaskDue} onChange={e => setNewTaskDue(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400" />
                                   </div>
                                   <div>
-                                      <label className="text-xs font-medium text-gray-700 mb-1 block">Tempo Estimado</label>
-                                      <input type="text" value={newTaskTime} onChange={e => setNewTaskTime(e.target.value)} placeholder="Ex: 30m, 2h" className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400" />
+                                      <label className="text-xs font-medium text-gray-700 mb-1 block">Tempo Estimado (min)</label>
+                                      <div className="relative">
+                                          <input type="number" value={newTaskTime} onChange={e => setNewTaskTime(e.target.value)} placeholder="Ex: 30" className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:border-purple-400 pr-8" />
+                                          <span className="absolute right-3 top-2.5 text-xs text-gray-400 font-medium">min</span>
+                                      </div>
                                   </div>
                               </div>
                               <div className="pt-2">
@@ -1421,20 +1479,23 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                       
                                       <div className="flex items-center gap-1 border rounded-full px-2 py-0.5 bg-gray-50 ml-auto">
                                           <Clock className="w-3 h-3 text-gray-400" />
-                                          <input 
-                                              type="text" 
-                                              placeholder="Ex: 30m, 2h" 
-                                              defaultValue={t.estimatedTime || ''}
-                                              onBlur={async (e) => {
-                                                  const newT = e.target.value;
-                                                  if (newT !== t.estimatedTime) {
-                                                      const updated = {...t, estimatedTime: newT};
-                                                      setDashTasks(prev => prev.map(pt => pt.id === t.id ? updated : pt));
-                                                      await api.saveTask(updated);
-                                                  }
-                                              }}
-                                              className="bg-transparent outline-none text-[10px] w-12 text-gray-600 placeholder-gray-400"
-                                          />
+                                          <div className="relative flex items-center">
+                                              <input 
+                                                  type="number" 
+                                                  placeholder="Ex: 30" 
+                                                  defaultValue={t.estimatedTime || ''}
+                                                  onBlur={async (e) => {
+                                                      const newT = e.target.value;
+                                                      if (newT !== t.estimatedTime) {
+                                                          const updated = {...t, estimatedTime: newT};
+                                                          setDashTasks(prev => prev.map(pt => pt.id === t.id ? updated : pt));
+                                                          await api.saveTask(updated);
+                                                      }
+                                                  }}
+                                                  className="bg-transparent outline-none text-[10px] w-8 text-gray-600 placeholder-gray-400 text-center"
+                                              />
+                                              <span className="text-[10px] text-gray-400 font-medium">min</span>
+                                          </div>
                                       </div>
                                   </div>
                               </div>
