@@ -85,7 +85,19 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
+  const defaultKanbanState: WaKanbanState = {
+      columns: [
+          { id: 'col_leads', title: 'Leads / Novos', color: '#3b82f6' },
+          { id: 'col_atendimento', title: 'Em Atendimento', color: '#eab308' },
+          { id: 'col_fechado', title: 'Negócio Fechado', color: '#22c55e' }
+      ],
+      tags: [],
+      cards: []
+  };
+
+  const kanbanState: WaKanbanState = (userSettings.waKanban && userSettings.waKanban.columns && userSettings.waKanban.columns.length > 0)
+      ? userSettings.waKanban
+      : defaultKanbanState;
 
   const handleToggleAI = async () => {
     const newValue = !aiEnabled;
