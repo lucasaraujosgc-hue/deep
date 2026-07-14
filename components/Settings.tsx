@@ -379,20 +379,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                   onChange={(e) => setFormData({ ...formData, whatsappTemplate: e.target.value })}
                 />
               </div>
-              <div className="space-y-2 pt-6 border-t border-gray-100">
-                <label className="block text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <MessageCircle className="w-4 h-4" /> Assinatura para Envio de Arquivos (WhatsApp)
-                </label>
-                <p className="text-xs text-gray-500">
-                  Este texto será utilizado ao enviar arquivos pelo WhatsApp (Ex: "_Esses arquivos também foram enviados por e-mail_").
-                </p>
-                <textarea
-                  className="w-full h-32 border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-green-500 outline-none"
-                  value={formData.whatsappFileSignature || ''}
-                  onChange={(e) => setFormData({ ...formData, whatsappFileSignature: e.target.value })}
-                  placeholder="_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nSeu Nome"
-                />
-              </div>
             </div>
           )}
 

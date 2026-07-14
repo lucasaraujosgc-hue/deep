@@ -117,8 +117,7 @@ const Send: React.FC<SendProps> = ({ documents, onSendDocuments, onNavigateToDoc
             messageBody: message,
             channels: { email: sendEmail, whatsapp: sendWhatsapp },
             emailSignature: userSettings.emailSignature,
-            whatsappTemplate: userSettings.whatsappTemplate,
-            whatsappFileSignature: userSettings.whatsappFileSignature
+            whatsappTemplate: userSettings.whatsappTemplate
         });
 
         if (result.success) {
