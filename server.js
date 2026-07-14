@@ -274,7 +274,6 @@ export const getDb = (username) => {
     }
     safeAlter("ALTER TABLE tasks ADD COLUMN googleTaskId TEXT");
     safeAlter("ALTER TABLE tasks ADD COLUMN estimatedTime TEXT");
-    safeAlter("ALTER TABLE tasks ADD COLUMN parentId INTEGER");
 
     dbInstances[username] = db;
     return db;
@@ -1692,7 +1691,7 @@ const getWaClientWrapper = (username) => {
                     log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
                 }
             } catch (e) {
-                // Ignore "r" or evaluate error 
+                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${e.message}`);
             }
         });
         
@@ -2043,8 +2042,8 @@ app.post('/api/tasks', async (req, res) => {
     try {
         if (t.id && t.id < 1000000000000) {
             const oldTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.id);
-            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=?, parentId=? WHERE id=?`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.parentId || null, t.id);
+            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=? WHERE id=?`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.id);
             
             if (oldTask && oldTask.googleTaskId && process.env.GOOGLE_CLIENT_ID) {
                 try {
@@ -2060,14 +2059,6 @@ app.post('/api/tasks', async (req, res) => {
             res.json({ success: true, id: t.id });
         } else {
             let gTaskId = null;
-            let parentGoogleId = null;
-            if (t.parentId) {
-                const parentTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.parentId);
-                if (parentTask && parentTask.googleTaskId) {
-                    parentGoogleId = parentTask.googleTaskId;
-                }
-            }
-
             if (process.env.GOOGLE_CLIENT_ID) {
                 try {
                     const token = await getGoogleAccessToken();
@@ -2080,13 +2071,7 @@ app.post('/api/tasks', async (req, res) => {
                     if (dt) {
                         gTaskReq.due = new Date(dt).toISOString();
                     }
-                    
-                    let url = 'https://tasks.googleapis.com/tasks/v1/lists/@default/tasks';
-                    if (parentGoogleId) {
-                        url += `?parent=${parentGoogleId}`;
-                    }
-
-                    const resG = await fetch(url, {
+                    const resG = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify(gTaskReq)
@@ -2098,8 +2083,8 @@ app.post('/api/tasks', async (req, res) => {
                 } catch(e) { console.error('Failed to create Google Task:', e); }
             }
 
-            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId, parentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId, t.parentId || null);
+            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId);
 
             res.json({ success: true, id: result.lastInsertRowid });
         }
@@ -2589,80 +2574,7 @@ app.get('/api/whatsapp/chat-info/:chatId', authenticateToken, async (req, res) =
 app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
-        const db = getDb(req.user);
-        
-        let kanbanCards = [];
-        try {
-            const row = db.prepare("SELECT settings FROM user_settings WHERE id = 1").get();
-            if (row && row.settings) {
-                const settings = JSON.parse(row.settings);
-                kanbanCards = (settings.waKanban?.cards || []).map(c => c.id);
-            }
-        } catch(e) {}
-        
-        if (wrapper && wrapper.status === 'connected') {
-            try {
-                const chats = await wrapper.client.getChats();
-                const filteredChats = chats.filter(c => !c.isGroup);
-                
-                filteredChats.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-                
-                const limitChats = [];
-                let count = 0;
-                for (const c of filteredChats) {
-                    if (kanbanCards.includes(c.id._serialized)) {
-                        limitChats.push(c);
-                    } else if (count < 50) {
-                        limitChats.push(c);
-                        count++;
-                    }
-                }
-
-                const simplifiedChats = limitChats.map(c => {
-                    return {
-                        id: c.id._serialized,
-                        name: c.name || c.id.user,
-                        unreadCount: c.unreadCount,
-                        timestamp: c.timestamp || 0,
-                        isGroup: c.isGroup,
-                        profilePicUrl: null,
-                        lastMessage: '',
-                        lastMessageFromMe: false
-                    };
-                });
-                
-                return res.json(simplifiedChats);
-            } catch(e) {
-                return res.status(500).json({error: e.message});
-            }
-        } else {
-            try {
-                let dbChats = [];
-                if (kanbanCards.length > 0) {
-                    const placeholders = kanbanCards.map(() => '?').join(',');
-                    const contacts = db.prepare(`SELECT contact_id, name FROM whatsapp_contacts WHERE contact_id IN (${placeholders})`).all(...kanbanCards);
-                    
-                    dbChats = kanbanCards.map(id => {
-                        const contact = contacts.find(c => c.contact_id === id);
-                        return {
-                            id: id,
-                            name: contact ? contact.name : id.split('@')[0],
-                            unreadCount: 0,
-                            timestamp: 0,
-                            isGroup: id.includes('@g.us'),
-                            profilePicUrl: null,
-                            lastMessage: '',
-                            lastMessageFromMe: false
-                        };
-                    });
-                }
-                return res.json(dbChats);
-            } catch (e) {
-                return res.json([]);
-            }
-        }
-    } catch(e) { res.status(500).json({error: e.message}); }
-});
+        if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         
         const db = getDb(req.user);
         let kanbanCards = [];
@@ -2676,44 +2588,19 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
         
         try {
             const chats = await wrapper.client.getChats();
-            const filteredChats = chats.filter(c => !c.isGroup);
-            
-            // Sort before slice to get most recent
-            filteredChats.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            
-            const limitChats = [];
-            let count = 0;
-            for (const c of filteredChats) {
-                if (kanbanCards.includes(c.id._serialized)) {
-                    limitChats.push(c);
-                } else if (count < 50) {
-                    limitChats.push(c);
-                    count++;
-                }
-            }
+            const now = Date.now() / 1000;
+            const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
+                if (kanbanCards.includes(c.id._serialized)) return true;
+                if (c.unreadCount > 0) return true;
+                if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true;
+                return false;
+            });
 
-            const simplifiedChats = limitChats.map(c => {
+            const simplifiedChats = filteredChats.map(c => {
                 return {
                     id: c.id._serialized,
                     name: c.name || c.id.user,
                     unreadCount: c.unreadCount,
-                    timestamp: c.timestamp || 0,
-                    isGroup: c.isGroup,
-                    profilePicUrl: null,
-                    lastMessage: '',
-                    lastMessageFromMe: false
-                };
-            });
-            
-            res.json(simplifiedChats);
-        } catch(e) {
-            res.status(500).json({error: e.message});
-        }
-    } catch(e) { res.status(500).json({error: e.message}); }
-});
-            
-            res.json(simplifiedChats);
-        } catch(e) {          unreadCount: c.unreadCount,
                     timestamp: c.timestamp,
                     isGroup: c.isGroup,
                     profilePicUrl: null,
@@ -2768,7 +2655,7 @@ app.post('/api/whatsapp/reset', async (req, res) => {
 });
 
 app.post('/api/send-documents', async (req, res) => {
-    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate, whatsappFileSignature } = req.body;
+    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate } = req.body;
     
     log(`[API send-documents] Iniciando envio de ${documents.length} documentos. Channels: ${JSON.stringify(channels)}`);
     
@@ -2869,7 +2756,7 @@ app.post('/api/send-documents', async (req, res) => {
                         `• ${att.docData.docName} (${att.docData.category || 'Anexo'}, Venc: ${att.docData.dueDate || 'N/A'})`
                     ).join('\n');
                     
-                    const whatsappSignature = whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
+                    const whatsappSignature = whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
                     let mensagemCompleta = `*📄 Olá!* \n\n${messageBody}`;
                     
                     if (listaArquivos) {

@@ -40,7 +40,6 @@ export interface Task {
   targetCompanyType?: 'normal' | 'mei'; 
   googleTaskId?: string;
   estimatedTime?: string;
-  parentId?: number;
 }
 
 export interface Document {
@@ -124,7 +123,6 @@ export interface WaKanbanState {
 export interface UserSettings {
   emailSignature: string;
   whatsappTemplate: string;
-  whatsappFileSignature?: string;
   visibleDocumentCategories: string[];
   customCategories: string[]; // Categorias criadas pelo usuário
   categoryKeywords: Record<string, string[]>;
