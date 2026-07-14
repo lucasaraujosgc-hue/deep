@@ -274,6 +274,7 @@ export const getDb = (username) => {
     }
     safeAlter("ALTER TABLE tasks ADD COLUMN googleTaskId TEXT");
     safeAlter("ALTER TABLE tasks ADD COLUMN estimatedTime TEXT");
+    safeAlter("ALTER TABLE tasks ADD COLUMN parentId INTEGER");
 
     dbInstances[username] = db;
     return db;
@@ -1691,7 +1692,7 @@ const getWaClientWrapper = (username) => {
                     log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
                 }
             } catch (e) {
-                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${e.message}`);
+                // Ignore "r" or evaluate error 
             }
         });
         
@@ -2042,8 +2043,8 @@ app.post('/api/tasks', async (req, res) => {
     try {
         if (t.id && t.id < 1000000000000) {
             const oldTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.id);
-            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=? WHERE id=?`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.id);
+            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=?, parentId=? WHERE id=?`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.parentId || null, t.id);
             
             if (oldTask && oldTask.googleTaskId && process.env.GOOGLE_CLIENT_ID) {
                 try {
@@ -2059,6 +2060,14 @@ app.post('/api/tasks', async (req, res) => {
             res.json({ success: true, id: t.id });
         } else {
             let gTaskId = null;
+            let parentGoogleId = null;
+            if (t.parentId) {
+                const parentTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.parentId);
+                if (parentTask && parentTask.googleTaskId) {
+                    parentGoogleId = parentTask.googleTaskId;
+                }
+            }
+
             if (process.env.GOOGLE_CLIENT_ID) {
                 try {
                     const token = await getGoogleAccessToken();
@@ -2071,7 +2080,13 @@ app.post('/api/tasks', async (req, res) => {
                     if (dt) {
                         gTaskReq.due = new Date(dt).toISOString();
                     }
-                    const resG = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+                    
+                    let url = 'https://tasks.googleapis.com/tasks/v1/lists/@default/tasks';
+                    if (parentGoogleId) {
+                        url += `?parent=${parentGoogleId}`;
+                    }
+
+                    const resG = await fetch(url, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify(gTaskReq)
@@ -2083,8 +2098,8 @@ app.post('/api/tasks', async (req, res) => {
                 } catch(e) { console.error('Failed to create Google Task:', e); }
             }
 
-            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId);
+            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId, parentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId, t.parentId || null);
 
             res.json({ success: true, id: result.lastInsertRowid });
         }
@@ -2655,7 +2670,7 @@ app.post('/api/whatsapp/reset', async (req, res) => {
 });
 
 app.post('/api/send-documents', async (req, res) => {
-    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate } = req.body;
+    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate, whatsappFileSignature } = req.body;
     
     log(`[API send-documents] Iniciando envio de ${documents.length} documentos. Channels: ${JSON.stringify(channels)}`);
     
@@ -2756,7 +2771,7 @@ app.post('/api/send-documents', async (req, res) => {
                         `• ${att.docData.docName} (${att.docData.category || 'Anexo'}, Venc: ${att.docData.dueDate || 'N/A'})`
                     ).join('\n');
                     
-                    const whatsappSignature = whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
+                    const whatsappSignature = whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
                     let mensagemCompleta = `*📄 Olá!* \n\n${messageBody}`;
                     
                     if (listaArquivos) {
