@@ -81,6 +81,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const [newTaskNotes, setNewTaskNotes] = useState('');
   const [newTaskDue, setNewTaskDue] = useState('');
   const [newTaskTime, setNewTaskTime] = useState('');
+  const [addingSubtaskTo, setAddingSubtaskTo] = useState<number | null>(null);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const kanbanState: WaKanbanState = userSettings.waKanban || { columns: [], tags: [], cards: [] };
@@ -130,6 +132,32 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
     } finally {
         setDashTasksLoading(false);
     }
+  };
+
+  const handleCreateSubtask = async (parentId: number, e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      if (!newSubtaskTitle) return;
+      setDashTasksLoading(true);
+      try {
+          const newTask = {
+              title: newSubtaskTitle,
+              description: '',
+              status: 'pendente' as const,
+              priority: 'media' as const,
+              color: 'bg-slate-100',
+              parentId: parentId
+          };
+          const res = await api.saveTask(newTask);
+          if (res.success) {
+              setNewSubtaskTitle('');
+              setAddingSubtaskTo(null);
+              await fetchDashTasks();
+          }
+      } catch (err) {
+          console.error(err);
+      } finally {
+          setDashTasksLoading(false);
+      }
   };
 
   const handleCreateTask = async (e: React.FormEvent) => {
@@ -622,6 +650,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   }
 
   const filteredDashTasks = dashTasks.filter(t => {
+      if (t.parentId) return false;
       let match = true;
       if (!showCompletedTasks && t.status === 'concluida') match = false;
       if (taskFilterName && !t.title.toLowerCase().includes(taskFilterName.toLowerCase())) match = false;
@@ -1497,6 +1526,70 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                                               <span className="text-[10px] text-gray-400 font-medium">min</span>
                                           </div>
                                       </div>
+                                  </div>
+                                  
+                                  {/* Subtasks */}
+                                  <div className="pl-4 border-l-2 border-gray-100 mt-2 space-y-2">
+                                      {dashTasks.filter(st => st.parentId === t.id).map(st => (
+                                          <div key={st.id} className={`flex flex-col gap-1 ${st.status === 'concluida' ? 'opacity-60' : ''}`}>
+                                              <div className="flex items-start justify-between gap-2">
+                                                  <div className="flex items-center gap-2">
+                                                      <button 
+                                                          onClick={async () => {
+                                                              const newStatus = st.status === 'concluida' ? 'pendente' : 'concluida';
+                                                              const updated = {...st, status: newStatus};
+                                                              setDashTasks(prev => prev.map(pt => pt.id === st.id ? updated : pt));
+                                                              await api.saveTask(updated);
+                                                          }}
+                                                          className={`shrink-0 ${st.status === 'concluida' ? 'text-green-500' : 'text-gray-400 hover:text-green-500'}`}
+                                                      >
+                                                          <CheckCircle2 className="w-3.5 h-3.5" />
+                                                      </button>
+                                                      <span className={`text-xs ${st.status === 'concluida' ? 'line-through text-gray-500' : 'text-gray-700'}`}>
+                                                          {st.title}
+                                                      </span>
+                                                  </div>
+                                                  <button 
+                                                      onClick={async () => {
+                                                          if(confirm('Tem certeza que deseja excluir esta subtarefa?')) {
+                                                              setDashTasks(prev => prev.filter(pt => pt.id !== st.id));
+                                                              await api.deleteTask(st.id);
+                                                          }
+                                                      }}
+                                                      className="p-1 text-gray-300 hover:text-red-500 rounded-md transition"
+                                                      title="Excluir subtarefa"
+                                                  >
+                                                      <X className="w-3 h-3" />
+                                                  </button>
+                                              </div>
+                                          </div>
+                                      ))}
+                                      
+                                      {addingSubtaskTo === t.id ? (
+                                          <form onSubmit={(e) => handleCreateSubtask(t.id, e)} className="flex items-center gap-2 mt-2">
+                                              <input 
+                                                  type="text" 
+                                                  autoFocus
+                                                  value={newSubtaskTitle}
+                                                  onChange={e => setNewSubtaskTitle(e.target.value)}
+                                                  placeholder="Nova subtarefa..."
+                                                  className="text-xs p-1 border border-gray-200 rounded outline-none focus:border-purple-300 flex-1"
+                                              />
+                                              <button type="submit" disabled={!newSubtaskTitle || dashTasksLoading} className="text-xs text-purple-600 font-medium hover:text-purple-700 disabled:opacity-50">
+                                                  Adicionar
+                                              </button>
+                                              <button type="button" onClick={() => { setAddingSubtaskTo(null); setNewSubtaskTitle(''); }} className="text-xs text-gray-400 hover:text-gray-600">
+                                                  Cancelar
+                                              </button>
+                                          </form>
+                                      ) : (
+                                          <button 
+                                              onClick={() => { setAddingSubtaskTo(t.id); setNewSubtaskTitle(''); }}
+                                              className="text-[10px] text-gray-400 hover:text-purple-600 font-medium flex items-center gap-1 mt-1"
+                                          >
+                                              <Plus className="w-3 h-3" /> Adicionar subtarefa
+                                          </button>
+                                      )}
                                   </div>
                               </div>
                           ))
