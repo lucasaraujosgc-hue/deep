@@ -1434,22 +1434,6 @@ const getWaClientWrapper = (username) => {
         
         const client = new Client({
             authStrategy: new LocalAuth({ clientId: username, dataPath: authPath }), 
-            // ============================================================
-            // FIX — Trava a versão do WhatsApp Web usada pela sessão.
-            // Sem isso, o whatsapp-web.js busca a versão mais recente do
-            // WhatsApp Web toda vez que a sessão é recriada/relinkada, o
-            // que pode não ser compatível com a versão da lib instalada
-            // e quebra client.getChats() (erro minificado "r"/"undefined").
-            // Com type: 'local', a PRIMEIRA conexão bem-sucedida salva o
-            // HTML da versão do WhatsApp Web em disco (path abaixo, dentro
-            // do volume persistente DATA_DIR) e reutiliza essa MESMA
-            // versão em reconexões futuras, mesmo após redeploys.
-            // ============================================================
-            webVersionCache: {
-                type: 'local',
-                path: path.join(DATA_DIR, 'wwebjs_cache'),
-                strict: false
-            },
             puppeteer: {
                 headless: true,
                 executablePath: puppeteerExecutablePath,
