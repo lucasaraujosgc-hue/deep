@@ -1665,33 +1665,38 @@ const getWaClientWrapper = (username) => {
             // ============================================================
             // FIX 1 — Popular cache de contatos proativamente ao conectar
             // ============================================================
-            try {
+                        try {
                 const db = getDb(username);
                 if (db) {
-                    const chats = await client.getChats();
-                    let seeded = 0;
-                    for (const chat of chats) {
-                        if (chat.isGroup) continue;
-                        const chatId = chat.id ? chat.id._serialized : null;
-                        if (!chatId) continue;
-                        const isLid = chatId.includes('@lid');
-                        let resolvedId = chatId;
-                        let phone = isLid ? null : chatId.replace('@c.us', '').replace(/\D/g, '');
-
-                        if (!isLid && phone) {
-                            try {
-                                const numberId = await client.getNumberId(phone);
-                                if (numberId && numberId._serialized) {
-                                    resolvedId = numberId._serialized;
-                                }
-                            } catch (_) {}
+                    try {
+                        const contacts = await client.getContacts();
+                        let seeded = 0;
+                        for (const contact of contacts) {
+                            if (contact.isGroup) continue;
+                            const contactId = contact.id ? contact.id._serialized : null;
+                            if (!contactId) continue;
+                            
+                            const isLid = contactId.includes('@lid');
+                            let resolvedId = contactId;
+                            let phone = isLid ? null : contact.number || contactId.replace('@c.us', '').replace(/\D/g, '');
+                            
+                            if (!isLid && phone) {
+                                try {
+                                    const numberId = await client.getNumberId(phone);
+                                    if (numberId && numberId._serialized) {
+                                        resolvedId = numberId._serialized;
+                                    }
+                                } catch (_) {}
+                            }
+                            
+                            const contactName = contact.name || contact.pushname || (contact.id && contact.id.user) || resolvedId;
+                            upsertContactCache(db, resolvedId, contactName, phone);
+                            seeded++;
                         }
-
-                        const contactName = chat.name || (chat.id && chat.id.user) || resolvedId;
-                        upsertContactCache(db, resolvedId, contactName, phone);
-                        seeded++;
+                        log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar (via getContacts).`);
+                    } catch (contactErr) {
+                        log(`[WhatsApp Cache] Erro ao buscar contatos: ${contactErr.message}`);
                     }
-                    log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
                 }
             } catch (e) {
                 log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${JSON.stringify(e, Object.getOwnPropertyNames(e))} - ${String(e)}`);
@@ -2649,6 +2654,30 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                     lastMessage: '',
                     lastMessageFromMe: false
                 })).filter(c => !c.isGroup && (kanbanCards.includes(c.id) || (c.timestamp && ((Date.now()/1000) - c.timestamp) < 86400 * 7)));
+                
+                const existingIds = new Set(simplifiedChats.map(c => c.id));
+                for (const kId of kanbanCards) {
+                    if (!existingIds.has(kId) && !kId.includes('@g.us')) {
+                        let cName = kId.replace('@c.us', '');
+                        try {
+                            const cRow = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(kId);
+                            if (cRow && cRow.name) cName = cRow.name;
+                        } catch(ce) {}
+                        
+                        simplifiedChats.push({
+                            id: kId,
+                            name: cName,
+                            unreadCount: 0,
+                            timestamp: Date.now() / 1000,
+                            isGroup: false,
+                            profilePicUrl: null,
+                            lastMessage: '',
+                            lastMessageFromMe: false
+                        });
+                    }
+                }
+                
+                simplifiedChats.sort((a, b) => b.timestamp - a.timestamp);
                 
                 res.json(simplifiedChats);
             } catch (dbErr) {
