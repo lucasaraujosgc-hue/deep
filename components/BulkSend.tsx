@@ -150,6 +150,9 @@ const BulkSend: React.FC<BulkSendProps> = ({ userSettings }) => {
                   subject: subject,
                   messageBody: message,
                   channels: channels,
+                  emailSignature: userSettings?.emailSignature,
+                  whatsappTemplate: userSettings?.whatsappTemplate,
+                  whatsappFileSignature: userSettings?.whatsappFileSignature,
               });
 
               alert("Envio em massa processado!");
