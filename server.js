@@ -2627,8 +2627,50 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
             simplifiedChats.sort((a, b) => b.timestamp - a.timestamp);
 
             res.json(simplifiedChats);
-        } catch(e) {
-            res.status(500).json({error: e.message});
+        } catch (e) {
+            log(`[WhatsApp] Erro ao obter chats via client: ${e.message}. Fallback para DB.`);
+            let fallbackChats = [];
+            try {
+                // Get all chats from kanbanCards
+                let chatIdsToInclude = new Set(kanbanCards);
+                
+                // Get recent chats from messages
+                const recentMessages = db.prepare(`SELECT chatId, MAX(timestamp) as timestamp FROM whatsapp_messages GROUP BY chatId ORDER BY timestamp DESC LIMIT 50`).all();
+                
+                for (let r of recentMessages) {
+                    chatIdsToInclude.add(r.chatId);
+                }
+                
+                const chatIdsArray = Array.from(chatIdsToInclude);
+                if (chatIdsArray.length > 0) {
+                    const placeholders = chatIdsArray.map(() => '?').join(',');
+                    const contacts = db.prepare(`SELECT contact_id, name FROM whatsapp_contacts WHERE contact_id IN (${placeholders})`).all(...chatIdsArray);
+                    const contactMap = {};
+                    for (let c of contacts) contactMap[c.contact_id] = c.name;
+                    
+                    const tsMap = {};
+                    for (let r of recentMessages) tsMap[r.chatId] = r.timestamp;
+                    
+                    fallbackChats = chatIdsArray.map(id => {
+                        return {
+                            id: id,
+                            name: contactMap[id] || id.split('@')[0],
+                            unreadCount: 0,
+                            timestamp: tsMap[id] || Math.floor(Date.now() / 1000),
+                            isGroup: id.includes('@g.us'),
+                            profilePicUrl: null,
+                            lastMessage: '',
+                            lastMessageFromMe: false
+                        };
+                    });
+                    
+                    fallbackChats.sort((a, b) => b.timestamp - a.timestamp);
+                }
+                res.json(fallbackChats);
+            } catch (fallbackError) {
+                log(`[WhatsApp] Erro no fallback de chats: ${fallbackError.message}`);
+                res.json([]);
+            }
         }
     } catch(e) { res.status(500).json({error: e.message}); }
 });
