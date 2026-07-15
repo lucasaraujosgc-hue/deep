@@ -1694,7 +1694,7 @@ const getWaClientWrapper = (username) => {
                     log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
                 }
             } catch (e) {
-                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${e.message}`);
+                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${JSON.stringify(e, Object.getOwnPropertyNames(e))} - ${String(e)}`);
             }
         });
         
@@ -2630,9 +2630,32 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
 
             res.json(simplifiedChats);
         } catch(e) {
-            res.status(500).json({error: e.message});
+            log(`[WhatsApp API] Erro ao buscar chats via client, usando DB como fallback: ${e.message || String(e)}`);
+            try {
+                const dbChats = db.prepare(`
+                    SELECT chatId as id, contactName as name, MAX(timestamp) as timestamp 
+                    FROM whatsapp_messages 
+                    GROUP BY chatId 
+                    ORDER BY timestamp DESC
+                `).all();
+                
+                const simplifiedChats = dbChats.map(c => ({
+                    id: c.id,
+                    name: c.name || c.id.replace('@c.us', ''),
+                    unreadCount: 0,
+                    timestamp: c.timestamp,
+                    isGroup: c.id.includes('@g.us'),
+                    profilePicUrl: null,
+                    lastMessage: '',
+                    lastMessageFromMe: false
+                })).filter(c => !c.isGroup && (kanbanCards.includes(c.id) || (c.timestamp && ((Date.now()/1000) - c.timestamp) < 86400 * 7)));
+                
+                res.json(simplifiedChats);
+            } catch (dbErr) {
+                res.status(500).json({error: e.message || String(e)});
+            }
         }
-    } catch(e) { res.status(500).json({error: e.message}); }
+    } catch(e) { res.status(500).json({error: e.message || String(e)}); }
 });
 
 app.post('/api/whatsapp/reset', async (req, res) => {
