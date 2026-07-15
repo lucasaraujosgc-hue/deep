@@ -2241,7 +2241,27 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         const chat = await wrapper.client.getChatById(req.params.chatId);
         const limitParam = parseInt(req.query.limit) || 50;
-        const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
+        let messages = [];
+        try {
+            messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
+        } catch (e) {
+            log(`[WhatsApp] Erro em fetchMessages para ${req.params.chatId}: ${e.message}. Fallback para banco de dados.`);
+            const db = getDb(req.user);
+            if (db) {
+                const rows = db.prepare(`SELECT * FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT ?`).all(req.params.chatId, limitParam).reverse();
+                return res.json(rows.map(row => ({
+                    id: { _serialized: row.id, id: row.id },
+                    from: row.fromMe ? undefined : row.sender,
+                    to: row.fromMe ? row.chatId : undefined,
+                    body: row.body,
+                    timestamp: row.timestamp,
+                    hasMedia: !!row.hasMedia,
+                    type: row.type || 'chat',
+                    fromMe: !!row.fromMe
+                })));
+            }
+            return res.status(500).json({error: e.message});
+        }
 
         const mapped = messages.map(m => ({
             id: m.id._serialized,
@@ -2394,7 +2414,19 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         let seenIds = new Set();
         let reachedLimit = false;
 
-        let fetchedBatch = await chat.fetchMessages({ limit: 100 });
+        let fetchedBatch = [];
+        try {
+            fetchedBatch = await chat.fetchMessages({ limit: 100 });
+        } catch (initialErr) {
+            log(`[History] Falha inicial ao buscar mensagens para ${chatId}: ${initialErr.message}. Tentando novamente em 2s...`);
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+                fetchedBatch = await chat.fetchMessages({ limit: 100 });
+            } catch (retryErr) {
+                log(`[History] Falha na segunda tentativa: ${retryErr.message}.`);
+                return res.status(500).json({ error: retryErr.message === 'r' ? 'O WhatsApp ainda está sincronizando no celular. Por favor, aguarde alguns minutos e tente novamente.' : retryErr.message });
+            }
+        }
         let lastOldestId = null;
 
         while (fetchedBatch && fetchedBatch.length > 0 && !reachedLimit) {
@@ -2650,8 +2682,27 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                     
                     const tsMap = {};
                     for (let r of recentMessages) tsMap[r.chatId] = r.timestamp;
+
+                    const lastMsgs = db.prepare(`
+                        SELECT m1.chatId, m1.body, m1.fromMe, m1.hasMedia, m1.type
+                        FROM whatsapp_messages m1
+                        JOIN (
+                            SELECT chatId, MAX(timestamp) as max_ts
+                            FROM whatsapp_messages
+                            WHERE chatId IN (${placeholders})
+                            GROUP BY chatId
+                        ) m2 ON m1.chatId = m2.chatId AND m1.timestamp = m2.max_ts
+                    `).all(...chatIdsArray);
+
+                    const lastMsgMap = {};
+                    for (let m of lastMsgs) lastMsgMap[m.chatId] = m;
                     
                     fallbackChats = chatIdsArray.map(id => {
+                        const m = lastMsgMap[id];
+                        let lastMsgStr = '';
+                        if (m) {
+                            lastMsgStr = m.body || (m.hasMedia ? '[Mídia]' : '');
+                        }
                         return {
                             id: id,
                             name: contactMap[id] || id.split('@')[0],
@@ -2659,8 +2710,8 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                             timestamp: tsMap[id] || Math.floor(Date.now() / 1000),
                             isGroup: id.includes('@g.us'),
                             profilePicUrl: null,
-                            lastMessage: '',
-                            lastMessageFromMe: false
+                            lastMessage: lastMsgStr,
+                            lastMessageFromMe: m ? !!m.fromMe : false
                         };
                     });
                     
