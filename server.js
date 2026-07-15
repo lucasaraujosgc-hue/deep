@@ -19,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
 
 // Configuração de diretórios
 const DATA_DIR = process.env.DATA_PATH || path.join(__dirname, 'data');
@@ -274,6 +274,7 @@ export const getDb = (username) => {
     }
     safeAlter("ALTER TABLE tasks ADD COLUMN googleTaskId TEXT");
     safeAlter("ALTER TABLE tasks ADD COLUMN estimatedTime TEXT");
+    safeAlter("ALTER TABLE tasks ADD COLUMN parentId INTEGER");
 
     dbInstances[username] = db;
     return db;
@@ -1011,7 +1012,8 @@ const executeTool = async (name, args, db, username) => {
                 const chats = await waWrapper.client.getChats();
                 for (const chat of chats) {
                     if (chat.isGroup) continue;
-                    const chatId = chat.id._serialized || "";
+                    const chatId = (chat.id && chat.id._serialized) || "";
+                    if (!chatId) continue;
                     const chatName = (chat.name || "").toLowerCase();
                     const phone = chatId.replace("@c.us", "").replace("@lid", "");
                     if (!chatName.includes(query) && !phone.includes(query.replace(/\D/g, ""))) continue;
@@ -1122,7 +1124,8 @@ const executeTool = async (name, args, db, username) => {
                 const chats = await waWrapper.client.getChats();
                 for (const chat of chats) {
                     if (chat.isGroup) continue;
-                    const chatId = chat.id._serialized;
+                    const chatId = chat.id && chat.id._serialized;
+                    if (!chatId) continue;
                     const chatPhone = chatId.replace('@c.us', '').replace('@lid', '').replace(/\D/g, '');
                     const nameMatch = (chat.name || '').toLowerCase().includes(lowerQuery);
                     const phoneMatch = phoneQuery.length >= 8 && chatPhone.includes(phoneQuery);
@@ -1669,7 +1672,7 @@ const getWaClientWrapper = (username) => {
                     let seeded = 0;
                     for (const chat of chats) {
                         if (chat.isGroup) continue;
-                        const chatId = chat.id._serialized;
+                        const chatId = chat.id ? chat.id._serialized : null;
                         if (!chatId) continue;
                         const isLid = chatId.includes('@lid');
                         let resolvedId = chatId;
@@ -1684,7 +1687,7 @@ const getWaClientWrapper = (username) => {
                             } catch (_) {}
                         }
 
-                        const contactName = chat.name || chat.id.user || resolvedId;
+                        const contactName = chat.name || (chat.id && chat.id.user) || resolvedId;
                         upsertContactCache(db, resolvedId, contactName, phone);
                         seeded++;
                     }
@@ -2042,8 +2045,8 @@ app.post('/api/tasks', async (req, res) => {
     try {
         if (t.id && t.id < 1000000000000) {
             const oldTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.id);
-            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=? WHERE id=?`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.id);
+            db.prepare(`UPDATE tasks SET title=?, description=?, status=?, priority=?, color=?, dueDate=?, companyId=?, recurrence=?, dayOfWeek=?, recurrenceDate=?, targetCompanyType=?, createdAt=?, estimatedTime=?, parentId=? WHERE id=?`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, t.parentId || null, t.id);
             
             if (oldTask && oldTask.googleTaskId && process.env.GOOGLE_CLIENT_ID) {
                 try {
@@ -2059,6 +2062,14 @@ app.post('/api/tasks', async (req, res) => {
             res.json({ success: true, id: t.id });
         } else {
             let gTaskId = null;
+            let parentGoogleId = null;
+            if (t.parentId) {
+                const parentTask = db.prepare('SELECT googleTaskId FROM tasks WHERE id = ?').get(t.parentId);
+                if (parentTask && parentTask.googleTaskId) {
+                    parentGoogleId = parentTask.googleTaskId;
+                }
+            }
+
             if (process.env.GOOGLE_CLIENT_ID) {
                 try {
                     const token = await getGoogleAccessToken();
@@ -2071,7 +2082,13 @@ app.post('/api/tasks', async (req, res) => {
                     if (dt) {
                         gTaskReq.due = new Date(dt).toISOString();
                     }
-                    const resG = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+                    
+                    let url = 'https://tasks.googleapis.com/tasks/v1/lists/@default/tasks';
+                    if (parentGoogleId) {
+                        url += `?parent=${parentGoogleId}`;
+                    }
+
+                    const resG = await fetch(url, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify(gTaskReq)
@@ -2083,8 +2100,8 @@ app.post('/api/tasks', async (req, res) => {
                 } catch(e) { console.error('Failed to create Google Task:', e); }
             }
 
-            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId);
+            const result = db.prepare(`INSERT INTO tasks (title, description, status, priority, color, dueDate, companyId, recurrence, dayOfWeek, recurrenceDate, targetCompanyType, createdAt, estimatedTime, googleTaskId, parentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(t.title, t.description, t.status, t.priority, t.color, t.dueDate, t.companyId, t.recurrence, t.dayOfWeek, t.recurrenceDate, t.targetCompanyType, createdAt, t.estimatedTime || null, gTaskId, t.parentId || null);
 
             res.json({ success: true, id: result.lastInsertRowid });
         }
@@ -2533,7 +2550,7 @@ app.post('/api/whatsapp/contact', async (req, res) => {
         const contactId = await wrapper.client.getNumberId(cleanNumber);
         if(contactId) {
             const chat = await wrapper.client.getChatById(contactId._serialized);
-            return res.json({ id: chat.id._serialized, name: chat.name, isGroup: chat.isGroup });
+            return res.json({ id: chat.id ? chat.id._serialized : contactId._serialized, name: chat.name, isGroup: chat.isGroup });
         }
         res.status(404).json({error: 'Contact not found on WhatsApp'});
     } catch(e) { res.status(500).json({error: e.message}); }
@@ -2589,7 +2606,7 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
         try {
             const chats = await wrapper.client.getChats();
             const now = Date.now() / 1000;
-            const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
+            const filteredChats = chats.filter(c => !c.isGroup && c.id && c.id._serialized).filter(c => {
                 if (kanbanCards.includes(c.id._serialized)) return true;
                 if (c.unreadCount > 0) return true;
                 if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true;
@@ -2599,7 +2616,7 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
             const simplifiedChats = filteredChats.map(c => {
                 return {
                     id: c.id._serialized,
-                    name: c.name || c.id.user,
+                    name: c.name || (c.id && c.id.user),
                     unreadCount: c.unreadCount,
                     timestamp: c.timestamp,
                     isGroup: c.isGroup,
@@ -2655,7 +2672,7 @@ app.post('/api/whatsapp/reset', async (req, res) => {
 });
 
 app.post('/api/send-documents', async (req, res) => {
-    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate } = req.body;
+    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate, whatsappFileSignature } = req.body;
     
     log(`[API send-documents] Iniciando envio de ${documents.length} documentos. Channels: ${JSON.stringify(channels)}`);
     
@@ -2756,7 +2773,7 @@ app.post('/api/send-documents', async (req, res) => {
                         `• ${att.docData.docName} (${att.docData.category || 'Anexo'}, Venc: ${att.docData.dueDate || 'N/A'})`
                     ).join('\n');
                     
-                    const whatsappSignature = whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
+                    const whatsappSignature = whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
                     let mensagemCompleta = `*📄 Olá!* \n\n${messageBody}`;
                     
                     if (listaArquivos) {
@@ -3089,4 +3106,4 @@ setInterval(() => {
     });
 }, 60000); 
 
-app.listen(port, () => log(`Server running at http://localhost:${port}`));
+app.listen(port, "0.0.0.0", () => log(`Server running at http://localhost:${port}`));
