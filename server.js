@@ -1438,7 +1438,6 @@ const getWaClientWrapper = (username) => {
             authStrategy: new LocalAuth({ clientId: username, dataPath: authPath }), 
             puppeteer: {
                 headless: true,
-                executablePath: puppeteerExecutablePath,
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
@@ -1661,6 +1660,48 @@ const getWaClientWrapper = (username) => {
             waClients[username].status = 'connected';
             waClients[username].qr = null;
             waClients[username].info = client.info;
+
+            try {
+                await client.pupPage.evaluate(() => {
+                    if (window.WWebJS) {
+                        window.WWebJS.getChats = async () => {
+                            const chats = window.require('WAWebCollections').Chat.getModelsArray();
+                            const chatPromises = chats.map(async (chat) => {
+                                try { return await window.WWebJS.getChatModel(chat); } catch(e) { return null; }
+                            });
+                            const resolved = await Promise.all(chatPromises);
+                            return resolved.filter(c => c !== null);
+                        };
+
+                        window.WWebJS.getChat = async (chatId, { getAsModel = true } = {}) => {
+                            const isChannel = /@\w*newsletter\b/.test(chatId);
+                            const chatWid = window.require('WAWebWidFactory').createWid(chatId);
+                            let chat;
+                            if (isChannel) {
+                                try {
+                                    chat = window.require('WAWebCollections').WAWebNewsletterCollection.get(chatId);
+                                    if (!chat) {
+                                        await window.require('WAWebLoadNewsletterPreviewChatAction').loadNewsletterPreviewChat(chatId);
+                                        chat = await window.require('WAWebCollections').WAWebNewsletterCollection.find(chatWid);
+                                    }
+                                } catch (e) { chat = null; }
+                            } else {
+                                chat = window.require('WAWebCollections').Chat.get(chatWid);
+                                if (!chat) {
+                                    try {
+                                        const res = await window.require('WAWebFindChatAction').findOrCreateLatestChat(chatWid);
+                                        chat = res ? res.chat : null;
+                                    } catch(e) { chat = null; }
+                                }
+                            }
+                            return getAsModel && chat ? await window.WWebJS.getChatModel(chat, { isChannel }) : chat;
+                        };
+                    }
+                });
+                log(`[WhatsApp Fix] Injection scripts aplicados com sucesso`);
+            } catch (injErr) {
+                log(`[WhatsApp Fix] Erro na injecao: ${injErr.message}`);
+            }
 
             // ============================================================
             // FIX 1 — Popular cache de contatos proativamente ao conectar
@@ -2248,18 +2289,41 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         const chat = await wrapper.client.getChatById(req.params.chatId);
         const limitParam = parseInt(req.query.limit) || 50;
-        const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
-
-        const mapped = messages.map(m => ({
-            id: m.id._serialized,
-            from: m.from,
-            to: m.to,
-            body: m.body,
-            timestamp: m.timestamp,
-            hasMedia: m.hasMedia,
-            type: m.type,
-            fromMe: m.fromMe
-        }));
+        
+        let mapped = [];
+        let messages = [];
+        try {
+            messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
+            mapped = messages.map(m => ({
+                id: m.id._serialized,
+                from: m.from,
+                to: m.to,
+                body: m.body,
+                timestamp: m.timestamp,
+                hasMedia: m.hasMedia,
+                type: m.type,
+                fromMe: m.fromMe
+            }));
+        } catch(e) {
+            log(`[WhatsApp API] Erro ao carregar fetchMessages, usando DB: ${e.message}`);
+            const db = getDb(req.user);
+            if (db) {
+                try {
+                    const dbMsgs = db.prepare('SELECT * FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT ?').all(req.params.chatId, limitParam);
+                    mapped = dbMsgs.map(m => ({
+                        id: m.id,
+                        from: m.sender,
+                        to: m.fromMe ? m.chatId : m.sender,
+                        body: m.body,
+                        timestamp: m.timestamp,
+                        hasMedia: m.hasMedia === 1,
+                        type: m.type || 'chat',
+                        fromMe: m.fromMe === 1
+                    })).reverse();
+                } catch(dbe) {}
+            }
+            return res.json(mapped);
+        }
 
         const db = getDb(req.user);
         if (db) {
@@ -2366,6 +2430,73 @@ app.get('/api/whatsapp/sync-status/:chatId', authenticateToken, async (req, res)
     }
 });
 
+
+app.post('/api/whatsapp/clear-history', authenticateToken, async (req, res) => {
+    try {
+        const db = getDb(req.user);
+        if (db) {
+            db.prepare('DELETE FROM whatsapp_messages').run();
+            log(`[History] Histórico de mensagens limpo para ${req.user}`);
+        }
+        res.json({ success: true, message: 'Histórico local limpo.' });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/whatsapp/sync-60-days', authenticateToken, async (req, res) => {
+    try {
+        const wrapper = getWaClientWrapper(req.user);
+        if (!wrapper || wrapper.status !== 'connected') {
+            return res.status(400).json({ error: 'WhatsApp não conectado' });
+        }
+        const db = getDb(req.user);
+        if (!db) return res.status(500).json({ error: 'DB não encontrado' });
+
+        res.json({ success: true, message: 'Sincronização de 60 dias iniciada em background.' });
+        
+        log(`[History Sync] Iniciando sincronização em lote (60 dias) para ${req.user}`);
+        
+        const chats = await wrapper.client.getChats();
+        const SIXTY_DAYS_AGO = Math.floor(Date.now() / 1000) - (60 * 24 * 3600);
+        let totalSaved = 0;
+
+        for (const chat of chats) {
+            if (chat.isGroup) continue; // Pular grupos por precaução
+            try {
+                let fetchedBatch = [];
+                try {
+                    fetchedBatch = await chat.fetchMessages({ limit: 1000 });
+                } catch (e) {
+                    continue;
+                }
+                
+                const inPeriod = fetchedBatch.filter(m => m.timestamp >= SIXTY_DAYS_AGO);
+                if (inPeriod.length > 0) {
+                    const toSave = inPeriod.map(m => ({
+                        id: m.id._serialized,
+                        chatId: chat.id._serialized,
+                        sender: m.from,
+                        timestamp: m.timestamp,
+                        body: m.body || '',
+                        fromMe: m.fromMe,
+                        hasMedia: m.hasMedia,
+                        type: m.type
+                    }));
+                    saveMessagesToDb(db, toSave);
+                    totalSaved += toSave.length;
+                }
+            } catch(chatErr) {
+                log(`[History Sync] Erro no chat ${chat.id._serialized}: ${chatErr.message}`);
+            }
+        }
+        log(`[History Sync] Finalizado para ${req.user}. ${totalSaved} mensagens salvas.`);
+    } catch(e) {
+        log(`[History Sync] Erro geral: ${e.message}`);
+    }
+});
+
+
 app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, res) => {
     try {
         const wrapper = getWaClientWrapper(req.user);
@@ -2401,7 +2532,13 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         let seenIds = new Set();
         let reachedLimit = false;
 
-        let fetchedBatch = await chat.fetchMessages({ limit: 100 });
+        let fetchedBatch = [];
+        try {
+            fetchedBatch = await chat.fetchMessages({ limit: 100 });
+        } catch (e) {
+            log(`[History] fetchMessages error: ${e.message}`);
+            return res.json({ already_synced: false, synced_count: 0, message: 'Erro ao buscar no WhatsApp Web API, fallback ativo.' });
+        }
         let lastOldestId = null;
 
         while (fetchedBatch && fetchedBatch.length > 0 && !reachedLimit) {
