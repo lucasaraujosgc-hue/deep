@@ -62,12 +62,23 @@ if (process.env.GEMINI_API_KEY) {
     log("AI: GEMINI_API_KEY não encontrada. O assistente inteligente estará desativado.");
 }
 
+import { createServer as createViteServer } from 'vite';
+
 // --- CONFIGURAÇÃO DO EXPRESS ---
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// Servir arquivos estáticos do frontend (pasta dist criada pelo Vite)
-app.use(express.static(path.join(__dirname, 'dist')));
+let vite;
+if (process.env.NODE_ENV !== 'production') {
+    vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+    });
+    app.use(vite.middlewares);
+} else {
+    // Servir arquivos estáticos do frontend (pasta dist criada pelo Vite)
+    app.use(express.static(path.join(__dirname, 'dist')));
+}
 
 // --- HELPER: Puppeteer Lock Cleaner ---
 const cleanPuppeteerLocks = (dir) => {
@@ -1459,14 +1470,18 @@ const getWaClientWrapper = (username) => {
                 return;
             }
 
-            const sender = msg.from;
-            const chatId = msg.from;
+            let sender = msg.from;
+            let chatId = msg.from;
             log(`[WhatsApp Inbound] Mensagem recebida de: ${sender} | Body: ${msg.body?.substring(0, 30)}...`);
 
             let contactName = null;
             try {
                 const contact = await msg.getContact();
                 contactName = contact.name || contact.pushname || contact.number || sender;
+                if (contact && contact.id && contact.id._serialized && contact.id._serialized.includes('@c.us')) {
+                    sender = contact.id._serialized;
+                    chatId = contact.id._serialized;
+                }
             } catch (e) { contactName = sender; }
 
             const db = getDb(username);
@@ -1601,11 +1616,14 @@ const getWaClientWrapper = (username) => {
         // ============================================================
         client.on('message_create', async (msg) => {
             if (msg.fromMe) {
-                const chatId = msg.to;
+                let chatId = msg.to;
                 let contactName = null;
                 try {
                     const contact = await msg.getContact();
                     contactName = contact.name || contact.pushname || contact.number || chatId;
+                    if (contact && contact.id && contact.id._serialized && contact.id._serialized.includes('@c.us')) {
+                        chatId = contact.id._serialized;
+                    }
                 } catch (e) { contactName = chatId; }
 
                 const db = getDb(username);
@@ -2299,6 +2317,16 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
 // ============================================================
 // SEÇÃO 4 — Rota /api/whatsapp/messages-db/:chatId
 // ============================================================
+app.get('/api/whatsapp/debug-db', authenticateToken, (req, res) => {
+    try {
+        const db = getDb(req.user);
+        const rows = db.prepare("SELECT * FROM whatsapp_messages ORDER BY timestamp DESC LIMIT 5").all();
+        res.json(rows);
+    } catch(e) {
+        res.status(500).json({error: e.message});
+    }
+});
+
 app.get('/api/whatsapp/messages-db/:chatId', authenticateToken, async (req, res) => {
     try {
         const db = getDb(req.user);
@@ -2482,19 +2510,37 @@ app.post('/api/whatsapp/send-chat', upload.single('media'), async (req, res) => 
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         
         let content = message || '';
+        let msgObj;
         if (req.file) {
             const fileData = fs.readFileSync(req.file.path).toString('base64');
             const media = new MessageMedia(req.file.mimetype, fileData, req.file.originalname);
-            await safeSendMessage(wrapper.client, chatId, content ? media : media, content ? {caption: content} : {});
+            msgObj = await safeSendMessage(wrapper.client, chatId, content ? media : media, content ? {caption: content} : {});
             const db = getDb(req.user);
             if(db) {
                 db.prepare('INSERT INTO file_gallery (serverFilename, originalName, mimeType, size, contact, channel, direction, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
                     .run(req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, chatId, 'whatsapp', 'sent', new Date().toISOString());
             }
         } else {
-            if(content) await safeSendMessage(wrapper.client, chatId, content);
+            if(content) msgObj = await safeSendMessage(wrapper.client, chatId, content);
         }
-        res.json({success: true});
+        
+        if (msgObj) {
+            const db = getDb(req.user);
+            if (db) {
+                saveMessageToDb(db, {
+                    id: msgObj.id._serialized,
+                    chatId,
+                    sender: wrapper.client.info?.wid?._serialized || '',
+                    timestamp: msgObj.timestamp,
+                    body: msgObj.body || '',
+                    fromMe: true,
+                    hasMedia: msgObj.hasMedia,
+                    type: msgObj.type
+                });
+            }
+        }
+        
+        res.json({success: true, msg: msgObj ? { id: msgObj.id._serialized, timestamp: msgObj.timestamp, body: msgObj.body, type: msgObj.type, hasMedia: msgObj.hasMedia } : null});
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
@@ -2611,7 +2657,10 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
         } catch(e) {}
         
         try {
-            const chats = await wrapper.client.getChats();
+            const chats = await Promise.race([
+                wrapper.client.getChats(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+            ]);
             const now = Date.now() / 1000;
             const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
                 if (kanbanCards.includes(c.id._serialized)) return true;
