@@ -290,6 +290,12 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
     return () => { es.close(); };
   }, []);
 
+  useEffect(() => {
+    if (!taskModeEnabled && waChats.length === 0) {
+      loadWaChats();
+    }
+  }, [taskModeEnabled]);
+
   const firstColId = kanbanState.columns[0]?.id;
   const mergedCards = waChats.map(chat => {
       const chatId = typeof chat.id === 'object' ? chat.id._serialized : chat.id;
