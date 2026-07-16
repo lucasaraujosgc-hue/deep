@@ -1692,7 +1692,7 @@ const getWaClientWrapper = (username) => {
                     log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
                 }
             } catch (e) {
-                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${e.message}`);
+                log(`[WhatsApp Cache] Aviso: Não foi possível popular cache via getChats() (provável instabilidade do WA Web): ${e.message}`);
             }
         });
         
@@ -2628,8 +2628,71 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
 
             res.json(simplifiedChats);
         } catch(e) {
-            log(`[API whatsapp/chats] Error fetching chats: ${e.message}`);
-            res.json([]);
+            log(`[API whatsapp/chats] Error fetching chats: ${e.message}. Using fallback.`);
+            try {
+                const fallbackChats = [];
+                const fallbackMap = new Map();
+                
+                // Add all cards from kanban
+                for (const id of kanbanCards) {
+                    if (id.includes('@g.us')) continue; // skip groups
+                    let name = id;
+                    try {
+                        const contactRow = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(id);
+                        if (contactRow && contactRow.name) name = contactRow.name;
+                    } catch(err) {}
+                    
+                    let timestamp = Date.now() / 1000;
+                    try {
+                        const msgRow = db.prepare("SELECT MAX(timestamp) as ts FROM whatsapp_messages WHERE chatId = ?").get(id);
+                        if (msgRow && msgRow.ts) timestamp = msgRow.ts;
+                    } catch(err) {}
+
+                    const cData = {
+                        id,
+                        name,
+                        unreadCount: 0,
+                        timestamp,
+                        isGroup: false,
+                        profilePicUrl: null,
+                        lastMessage: '',
+                        lastMessageFromMe: false
+                    };
+                    fallbackMap.set(id, cData);
+                }
+                
+                // Add recent chats from db
+                try {
+                    const recentRows = db.prepare("SELECT chatId, contactName, MAX(timestamp) as ts FROM whatsapp_messages WHERE chatId NOT LIKE '%@g.us' GROUP BY chatId ORDER BY ts DESC").all();
+                    for (const row of recentRows) {
+                        if (!fallbackMap.has(row.chatId)) {
+                            let name = row.contactName || row.chatId;
+                            try {
+                                const contactRow = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(row.chatId);
+                                if (contactRow && contactRow.name) name = contactRow.name;
+                            } catch(err) {}
+                            
+                            fallbackMap.set(row.chatId, {
+                                id: row.chatId,
+                                name,
+                                unreadCount: 0,
+                                timestamp: row.ts,
+                                isGroup: false,
+                                profilePicUrl: null,
+                                lastMessage: '',
+                                lastMessageFromMe: false
+                            });
+                        }
+                    }
+                } catch(err) {}
+                
+                const finalChats = Array.from(fallbackMap.values());
+                finalChats.sort((a, b) => b.timestamp - a.timestamp);
+                res.json(finalChats);
+            } catch(fallbackErr) {
+                log(`[API whatsapp/chats] Fallback error: ${fallbackErr.message}`);
+                res.json([]);
+            }
         }
     } catch(e) { res.status(500).json({error: e.message}); }
 });
