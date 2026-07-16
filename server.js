@@ -2628,7 +2628,8 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
 
             res.json(simplifiedChats);
         } catch(e) {
-            res.status(500).json({error: e.message});
+            log(`[API whatsapp/chats] Error fetching chats: ${e.message}`);
+            res.json([]);
         }
     } catch(e) { res.status(500).json({error: e.message}); }
 });
