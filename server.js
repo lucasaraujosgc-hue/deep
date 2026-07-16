@@ -2572,7 +2572,16 @@ app.get('/api/whatsapp/chat-info/:chatId', authenticateToken, async (req, res) =
                 lastMessage = msgs[0].body || (msgs[0].hasMedia ? '[Mídia]' : '');
                 lastMessageFromMe = msgs[0].fromMe;
             }
-        } catch(e) {}
+        } catch(e) {
+            try {
+                const db = getDb(req.user);
+                const dbMsg = db.prepare("SELECT body, hasMedia, type, fromMe FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(chatId);
+                if (dbMsg) {
+                    lastMessage = dbMsg.body || (dbMsg.hasMedia || (dbMsg.type && dbMsg.type !== 'chat') ? '[Mídia]' : '');
+                    lastMessageFromMe = dbMsg.fromMe === 1;
+                }
+            } catch(dbErr) {}
+        }
         
         res.json({
             profilePicUrl,
@@ -2643,9 +2652,15 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                     } catch(err) {}
                     
                     let timestamp = Date.now() / 1000;
+                    let lastMessage = '';
+                    let lastMessageFromMe = false;
                     try {
-                        const msgRow = db.prepare("SELECT MAX(timestamp) as ts FROM whatsapp_messages WHERE chatId = ?").get(id);
-                        if (msgRow && msgRow.ts) timestamp = msgRow.ts;
+                        const msgRow = db.prepare("SELECT timestamp as ts, body, hasMedia, type, fromMe FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(id);
+                        if (msgRow) {
+                            timestamp = msgRow.ts || timestamp;
+                            lastMessage = msgRow.body || (msgRow.hasMedia || (msgRow.type && msgRow.type !== 'chat') ? '[Mídia]' : '');
+                            lastMessageFromMe = msgRow.fromMe === 1;
+                        }
                     } catch(err) {}
 
                     const cData = {
@@ -2655,8 +2670,8 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                         timestamp,
                         isGroup: false,
                         profilePicUrl: null,
-                        lastMessage: '',
-                        lastMessageFromMe: false
+                        lastMessage,
+                        lastMessageFromMe
                     };
                     fallbackMap.set(id, cData);
                 }
@@ -2672,6 +2687,16 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                                 if (contactRow && contactRow.name) name = contactRow.name;
                             } catch(err) {}
                             
+                            let lastMessage = '';
+                            let lastMessageFromMe = false;
+                            try {
+                                const msgRow = db.prepare("SELECT body, hasMedia, type, fromMe FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(row.chatId);
+                                if (msgRow) {
+                                    lastMessage = msgRow.body || (msgRow.hasMedia || (msgRow.type && msgRow.type !== 'chat') ? '[Mídia]' : '');
+                                    lastMessageFromMe = msgRow.fromMe === 1;
+                                }
+                            } catch(err) {}
+                            
                             fallbackMap.set(row.chatId, {
                                 id: row.chatId,
                                 name,
@@ -2679,8 +2704,8 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                                 timestamp: row.ts,
                                 isGroup: false,
                                 profilePicUrl: null,
-                                lastMessage: '',
-                                lastMessageFromMe: false
+                                lastMessage,
+                                lastMessageFromMe
                             });
                         }
                     }
