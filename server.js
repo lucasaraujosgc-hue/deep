@@ -35,11 +35,14 @@ const log = (message, error = null) => {
     let errorDetail = '';
     
     if (error) {
-        errorDetail = `\nERROR: ${error.message}`;
-        if (error.stack) errorDetail += `\nSTACK: ${error.stack}`;
+        errorDetail = `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nERROR: ${error.message}`;
+        if (error.stack) errorDetail += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nSTACK: ${error.stack}`;
     }
 
-    const logMessage = `[${timestamp}] ${message}${errorDetail}\n`;
+    const logMessage = `[${timestamp}] ${message}${errorDetail}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
     console.log(`[APP] ${message}`);
     if (error) console.error(error);
 
@@ -108,7 +111,8 @@ const safeSendMessage = async (client, chatId, content, options = {}) => {
         let finalChatId = chatId;
         
         if (!finalChatId.includes('@')) {
-             if (/^\d+$/.test(finalChatId)) {
+             if (/^const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);d+$/.test(finalChatId)) {
                  finalChatId = `${finalChatId}@c.us`;
              } else {
                  throw new Error("ChatId mal formatado: " + chatId);
@@ -117,7 +121,8 @@ const safeSendMessage = async (client, chatId, content, options = {}) => {
 
         try {
             if (finalChatId.endsWith('@c.us')) {
-                const numberPart = finalChatId.replace('@c.us', '').replace(/\D/g, '');
+                const numberPart = finalChatId.replace('@c.us', '').replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                 const contactId = await client.getNumberId(numberPart);
                 
                 if (contactId && contactId._serialized) {
@@ -128,6 +133,7 @@ const safeSendMessage = async (client, chatId, content, options = {}) => {
             log(`[WhatsApp] Erro não bloqueante ao resolver getNumberId: ${idErr.message}`);
         }
 
+        await ensureWaInjection(client);
         try {
             const chat = await client.getChatById(finalChatId);
             const msg = await chat.sendMessage(content, safeOptions);
@@ -414,7 +420,9 @@ const createGoogleTask = async (title, description, datetimeStr, subtasks = [], 
 
         let finalNotes = description || '';
         if (recurrenceText && recurrenceText.trim() !== '') {
-            finalNotes += finalNotes ? `\n\n🔄 Repetição: ${recurrenceText}` : `🔄 Repetição: ${recurrenceText}`;
+            finalNotes += finalNotes ? `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n🔄 Repetição: ${recurrenceText}` : `🔄 Repetição: ${recurrenceText}`;
         }
 
         const task = {
@@ -764,7 +772,8 @@ const executeTool = async (name, args, db, username) => {
     // 2. Atualizar Status
     if (name === "update_task_status") {
         try {
-            const isId = /^\d+$/.test(args.task_id_or_title);
+            const isId = /^const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);d+$/.test(args.task_id_or_title);
             const sqlCheck = isId ? "SELECT id FROM tasks WHERE id = ?" : "SELECT id FROM tasks WHERE title LIKE ?";
             const paramCheck = isId ? args.task_id_or_title : `%${args.task_id_or_title}%`;
 
@@ -827,7 +836,8 @@ const executeTool = async (name, args, db, username) => {
                         cc: emailList.slice(1),
                         subject: "Comunicado Contabilidade",
                         text: args.message_body, 
-                        html: buildEmailHtml(args.message_body, [], "Atenciosamente,\nContabilidade")
+                        html: buildEmailHtml(args.message_body, [], "Atenciosamente,const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nContabilidade")
                     };
                     await emailTransporter.sendMail(mailOptions);
                     await saveToImapSentFolder(mailOptions).catch(err => 
@@ -841,7 +851,8 @@ const executeTool = async (name, args, db, username) => {
                 const waWrapper = getWaClientWrapper(username);
                 if (waWrapper && waWrapper.status === 'connected') {
                     try {
-                        let number = company.whatsapp.replace(/\D/g, '');
+                        let number = company.whatsapp.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                         if (!number.startsWith('55')) number = '55' + number;
                         const chatId = `${number}@c.us`;
                         await safeSendMessage(waWrapper.client, chatId, args.message_body);
@@ -876,7 +887,8 @@ const executeTool = async (name, args, db, username) => {
             return "WhatsApp não está conectado. Impossível enviar a mensagem.";
         }
         try {
-            let phone = (args.phone || '').replace(/\D/g, '');
+            let phone = (args.phone || '').replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
             if (!phone.startsWith('55')) phone = '55' + phone;
             const chatId = `${phone}@c.us`;
             await safeSendMessage(waWrapper.client, chatId, args.message);
@@ -898,7 +910,9 @@ const executeTool = async (name, args, db, username) => {
             sql += " ORDER BY name ASC LIMIT 30";
             const rows = db.prepare(sql).all(...params);
             if (!rows || rows.length === 0) return "Nenhuma empresa encontrada com esse filtro.";
-            return `${rows.length} empresa(s) encontrada(s):\n` + rows.map(r => `• ${r.name} (${r.type || 'N/A'}) | WA: ${r.whatsapp || '-'} | Email: ${r.email || '-'}`).join('\n');
+            return `${rows.length} empresa(s) encontrada(s):const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n` + rows.map(r => `• ${r.name} (${r.type || 'N/A'}) | WA: ${r.whatsapp || '-'} | Email: ${r.email || '-'}`).join('const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n');
         } catch (err) {
             return "Erro ao listar empresas: " + err.message;
         }
@@ -921,7 +935,8 @@ const executeTool = async (name, args, db, username) => {
     // ============================================================
     if (name === "add_tag_to_contact") {
         try {
-            let phone = (args.phone || '').replace(/\D/g, '');
+            let phone = (args.phone || '').replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
             if (!phone.startsWith('55')) phone = '55' + phone;
             const possibleChatId = `${phone}@c.us`;
 
@@ -950,7 +965,9 @@ const executeTool = async (name, args, db, username) => {
                 "SELECT companyName, docName, category, sentAt, channels, status FROM sent_logs ORDER BY id DESC LIMIT ?"
             ).all(limit);
             if (!rows || rows.length === 0) return "Nenhum envio registrado ainda.";
-            return `Últimos ${rows.length} envio(s):\n` + rows.map(r => `• ${r.sentAt} | ${r.companyName} | ${r.docName} (${r.category}) | ${r.status}`).join('\n');
+            return `Últimos ${rows.length} envio(s):const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n` + rows.map(r => `• ${r.sentAt} | ${r.companyName} | ${r.docName} (${r.category}) | ${r.status}`).join('const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n');
         } catch (err) {
             return "Erro ao consultar histórico.";
         }
@@ -995,7 +1012,8 @@ const executeTool = async (name, args, db, username) => {
             // 1) Buscar no cache local primeiro
             const contactsCache = db.prepare(
                 "SELECT contact_id, name, phone_number FROM whatsapp_contacts WHERE name LIKE ? OR phone_number LIKE ?"
-            ).all(`%${query}%`, `%${query.replace(/\D/g, '')}%`);
+            ).all(`%${query}%`, `%${query.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '')}%`);
 
             for (const c of contactsCache) {
                 results.push({
@@ -1016,7 +1034,8 @@ const executeTool = async (name, args, db, username) => {
                     if (!chatId) continue;
                     const chatName = (chat.name || "").toLowerCase();
                     const phone = chatId.replace("@c.us", "").replace("@lid", "");
-                    if (!chatName.includes(query) && !phone.includes(query.replace(/\D/g, ""))) continue;
+                    if (!chatName.includes(query) && !phone.includes(query.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, ""))) continue;
                     if (results.some(r => r.chat_id === chatId)) continue;
 
                     const isLid = chatId.includes('@lid');
@@ -1056,16 +1075,29 @@ const executeTool = async (name, args, db, username) => {
 
             if (results.length === 0) return `Nenhum contato encontrado para "${args.query}".`;
 
-            let reply = `🔍 *Contatos encontrados:*\n\n`;
+            let reply = `🔍 *Contatos encontrados:*const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
             for (let i = 0; i < results.length; i++) {
                 const r = results[i];
-                reply += `${i+1}. *${r.name}*\n`;
-                reply += `   ID: \`${r.chat_id}\`\n`;
-                reply += `   Tipo: ${r.chat_id_type === 'lid' ? '🔒 LID (conversa criptografada)' : '📞 Número de telefone'}\n`;
-                if (r.phone_number) reply += `   Telefone: +${r.phone_number}\n`;
-                reply += `\n`;
+                reply += `${i+1}. *${r.name}*const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+                reply += `   ID: const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);`${r.chat_id}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);`const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+                reply += `   Tipo: ${r.chat_id_type === 'lid' ? '🔒 LID (conversa criptografada)' : '📞 Número de telefone'}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+                if (r.phone_number) reply += `   Telefone: +${r.phone_number}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+                reply += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
             }
-            reply += `👉 Use o campo \`chat_id\` exatamente como mostrado para enviar mensagem com \`send_message_to_contact\`.`;
+            reply += `👉 Use o campo const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);`chat_idconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);` exatamente como mostrado para enviar mensagem com const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);`send_message_to_contactconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);`.`;
             return reply;
 
         } catch (e) {
@@ -1087,7 +1119,8 @@ const executeTool = async (name, args, db, username) => {
         try {
             let resolvedChatId = null;
 
-            const phoneQuery = query.replace(/\D/g, '');
+            const phoneQuery = query.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
             const hasPhoneDigits = phoneQuery.length >= 6;
 
             let cacheRow;
@@ -1126,7 +1159,8 @@ const executeTool = async (name, args, db, username) => {
                     if (chat.isGroup) continue;
                     const chatId = chat.id && chat.id._serialized;
                     if (!chatId) continue;
-                    const chatPhone = chatId.replace('@c.us', '').replace('@lid', '').replace(/\D/g, '');
+                    const chatPhone = chatId.replace('@c.us', '').replace('@lid', '').replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                     const nameMatch = (chat.name || '').toLowerCase().includes(lowerQuery);
                     const phoneMatch = phoneQuery.length >= 8 && chatPhone.includes(phoneQuery);
                     const idMatch = chatId === query;
@@ -1205,7 +1239,8 @@ const executeTool = async (name, args, db, username) => {
             if (contactQ) {
                 const contacts = db.prepare(
                     "SELECT contact_id, name, phone_number FROM whatsapp_contacts WHERE name LIKE ? OR phone_number LIKE ?"
-                ).all(`%${contactQ}%`, `%${contactQ.replace(/\D/g, '')}%`);
+                ).all(`%${contactQ}%`, `%${contactQ.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '')}%`);
 
                 if (!contacts || contacts.length === 0) {
                     return `Nenhum contato encontrado com nome ou número semelhante a "${contactQ}".`;
@@ -1229,8 +1264,11 @@ const executeTool = async (name, args, db, username) => {
                     const t = new Date(r.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
                     const who = r.fromMe ? "Você" : (r.displayName || r.chatId.replace("@c.us","").replace("@lid",""));
                     return `[${t}] ${who}: ${r.body.slice(0,150)}`;
-                }).join("\n");
-                return `Últimas ${rows.length} mensagens com "${contactQ}" (${period}):\n\n${summary}`;
+                }).join("const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n");
+                return `Últimas ${rows.length} mensagens com "${contactQ}" (${period}):const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${summary}`;
             } else {
                 const sqlContatos = `
                     SELECT
@@ -1264,11 +1302,17 @@ const executeTool = async (name, args, db, username) => {
                     const amostras = msgs.map(m => {
                         const t = new Date(m.timestamp * 1000).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
                         return `   [${t}] ${m.body.slice(0,120)}`;
-                    }).join("\n");
-                    return `${header}\n${amostras}`;
-                }).join("\n\n");
+                    }).join("const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n");
+                    return `${header}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${amostras}`;
+                }).join("const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n");
 
-                return `${contatos.length} contato(s) enviaram mensagens (${period}):\n\n${lines}`;
+                return `${contatos.length} contato(s) enviaram mensagens (${period}):const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${lines}`;
             }
         } catch (err) {
             return "Erro ao buscar mensagens: " + err.message;
@@ -1305,7 +1349,8 @@ const processAI = async (username, userMessage, mediaPart = null) => {
     const db = getDb(username);
     if (!db || !ai) return "Sistema de IA indisponível.";
 
-    const greetingRegex = /^(oi|ola|olá|bom dia|boa tarde|boa noite|opa|eai|tudo bem|ajuda)\??$/i;
+    const greetingRegex = /^(oi|ola|olá|bom dia|boa tarde|boa noite|opa|eai|tudo bem|ajuda)const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);??$/i;
     if (!mediaPart && greetingRegex.test(userMessage.trim())) {
         return "Olá! Sou seu assistente. Posso consultar empresas, anotar tarefas, enviar mensagens e lembrar você de coisas. Como ajudo?";
     }
@@ -1406,7 +1451,9 @@ const broadcastWaEvent = (username, eventType, data) => {
     if (waClients[username] && waClients[username].sseClients) {
         waClients[username].sseClients.forEach(res => {
             try {
-                res.write(`data: ${JSON.stringify({ type: eventType, payload: data })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: eventType, payload: data })}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`);
             } catch (e) {}
         });
     }
@@ -1543,12 +1590,15 @@ const getWaClientWrapper = (username) => {
                         isAuthorized = (msg.from === settings.authorizedLid);
                     }
                 } else {
-                    const senderNumber = msg.from.replace('@c.us', '').replace(/\D/g, '');
-                    if (senderNumber === FALLBACK_AUTHORIZED_NUMBER.replace(/\D/g, '')) {
+                    const senderNumber = msg.from.replace('@c.us', '').replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
+                    if (senderNumber === FALLBACK_AUTHORIZED_NUMBER.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '')) {
                         isAuthorized = true;
                     }
                     if (!isAuthorized && settings?.dailySummaryNumber) {
-                        const authorizedNumber = settings.dailySummaryNumber.replace(/\D/g, '');
+                        const authorizedNumber = settings.dailySummaryNumber.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                         isAuthorized = senderNumber.endsWith(authorizedNumber);
                     }
                 }
@@ -1674,7 +1724,9 @@ const getWaClientWrapper = (username) => {
                         };
 
                         window.WWebJS.getChat = async (chatId, { getAsModel = true } = {}) => {
-                            const isChannel = /@\w*newsletter\b/.test(chatId);
+                            const isChannel = /@const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);w*newsletterconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);b/.test(chatId);
                             const chatWid = window.require('WAWebWidFactory').createWid(chatId);
                             let chat;
                             if (isChannel) {
@@ -1719,7 +1771,8 @@ const getWaClientWrapper = (username) => {
                             
                             const isLid = contactId.includes('@lid');
                             let resolvedId = contactId;
-                            let phone = isLid ? null : contact.number || contactId.replace('@c.us', '').replace(/\D/g, '');
+                            let phone = isLid ? null : contact.number || contactId.replace('@c.us', '').replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                             
                             if (!isLid && phone) {
                                 try {
@@ -1796,17 +1849,26 @@ const sendDailySummaryToUser = async (user) => {
         const priorityMap = { 'alta': 1, 'media': 2, 'baixa': 3 };
         const sortedTasks = tasks.sort((a, b) => (priorityMap[a.priority] || 99) - (priorityMap[b.priority] || 99));
 
-        let message = `*📅 Resumo Diário de Tarefas*\n\nVocê tem *${sortedTasks.length}* tarefas pendentes.\n\n`;
+        let message = `*📅 Resumo Diário de Tarefas*const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nVocê tem *${sortedTasks.length}* tarefas pendentes.const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
         sortedTasks.forEach(task => {
             let icon = task.priority === 'alta' ? '🔴' : task.priority === 'media' ? '🟡' : '🔵';
-            message += `${icon} *${task.title}*\n`;
-            if (task.companyName) message += `   🏢 ${task.companyName}\n`;
-            if (task.dueDate) message += `   📅 Vence: ${task.dueDate}\n`;
-            message += `\n`;
+            message += `${icon} *${task.title}*const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+            if (task.companyName) message += `   🏢 ${task.companyName}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+            if (task.dueDate) message += `   📅 Vence: ${task.dueDate}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
+            message += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n`;
         });
         message += `_Gerado automaticamente pelo Contábil Manager Pro_`;
 
-        let number = settings.dailySummaryNumber.replace(/\D/g, '');
+        let number = settings.dailySummaryNumber.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
         if (!number.startsWith('55')) number = '55' + number;
         const chatId = `${number}@c.us`;
         
@@ -1853,7 +1915,8 @@ const buildEmailHtml = (messageBody, documents, emailSignature) => {
         });
         docsTable = `<h3 style="color: #2c3e50; border-bottom: 2px solid #eff6ff; padding-bottom: 10px; margin-top: 30px; font-size: 16px;">Documentos em Anexo:</h3><table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;"><thead><tr style="background-color: #f8fafc; color: #64748b;"><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Documento</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Categoria</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Vencimento</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Competência</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
-    return `<html><body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);"><div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px; border-left: 4px solid #2563eb; margin-bottom: 25px;">${messageBody.replace(/\n/g, '<br>')}</div>${docsTable}<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #64748b;">${emailSignature || ''}</div></div></body></html>`;
+    return `<html><body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);"><div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px; border-left: 4px solid #2563eb; margin-bottom: 25px;">${messageBody.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n/g, '<br>')}</div>${docsTable}<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #64748b;">${emailSignature || ''}</div></div></body></html>`;
 };
 
 // --- ROUTES ---
@@ -1864,7 +1927,11 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
         const msg = req.body.message;
         const historyContext = req.body.historyContext || '';
         const enrichedMsg = historyContext
-            ? `[Contexto do histórico local de conversas com a IA:\n${historyContext}\n---\nMensagem atual:]\n${msg}`
+            ? `[Contexto do histórico local de conversas com a IA:const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${historyContext}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n---const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nMensagem atual:]const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${msg}`
             : msg;
         const reply = await processAI(username, enrichedMsg);
         res.json({ reply });
@@ -2287,12 +2354,13 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
     try {
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
-        const chat = await wrapper.client.getChatById(req.params.chatId);
-        const limitParam = parseInt(req.query.limit) || 50;
+        const limitParam = parseInt(req.query.limit) ||const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);
         
         let mapped = [];
         let messages = [];
         try {
+            const chat = await wrapper.client.getChatById(req.params.chatId);
             messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
             mapped = messages.map(m => ({
                 id: m.id._serialized,
@@ -2526,17 +2594,17 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         log(`[History] Iniciando busca de histórico 45 dias para: ${chatId}`);
 
         const FORTY_FIVE_DAYS_AGO = Math.floor(Date.now() / 1000) - (45 * 24 * 3600);
-        const chat = await wrapper.client.getChatById(chatId);
-
+        
         let allMessages = [];
         let seenIds = new Set();
         let reachedLimit = false;
 
         let fetchedBatch = [];
         try {
+            const chat = await wrapper.client.getChatById(chatId);
             fetchedBatch = await chat.fetchMessages({ limit: 100 });
         } catch (e) {
-            log(`[History] fetchMessages error: ${e.message}`);
+            log(`[History] getChatById / fetchMessages error: ${e.message}`);
             return res.json({ already_synced: false, synced_count: 0, message: 'Erro ao buscar no WhatsApp Web API, fallback ativo.' });
         }
         let lastOldestId = null;
@@ -2687,12 +2755,17 @@ app.post('/api/whatsapp/contact', async (req, res) => {
         const { number } = req.body;
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
-        let cleanNumber = number.replace(/\D/g, '');
+        let cleanNumber = number.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
         if(!cleanNumber.startsWith('55')) cleanNumber = '55' + cleanNumber;
         const contactId = await wrapper.client.getNumberId(cleanNumber);
         if(contactId) {
-            const chat = await wrapper.client.getChatById(contactId._serialized);
-            return res.json({ id: chat.id ? chat.id._serialized : contactId._serialized, name: chat.name, isGroup: chat.isGroup });
+            try {
+                const chat = await wrapper.client.getChatById(contactId._serialized);
+                return res.json({ id: chat.id ? chat.id._serialized : contactId._serialized, name: chat.name, isGroup: chat.isGroup });
+            } catch (err) {
+                return res.json({ id: contactId._serialized, name: '', isGroup: false });
+            }
         }
         res.status(404).json({error: 'Contact not found on WhatsApp'});
     } catch(e) { res.status(500).json({error: e.message}); }
@@ -2813,7 +2886,10 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                 
                 const simplifiedChats = dbChats.map(c => ({
                     id: c.id,
-                    name: c.name || c.id.replace(/@(c\.us|lid|s\.whatsapp\.net)$/, ''),
+                    name: c.name || c.id.replace(/@(cconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);.us|lid|sconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);.whatsappconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);.net)$/, ''),
                     unreadCount: 0,
                     timestamp: c.timestamp,
                     isGroup: c.id.includes('@g.us'),
@@ -2825,7 +2901,10 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
                 const existingIds = new Set(simplifiedChats.map(c => c.id));
                 for (const kId of kanbanCards) {
                     if (!existingIds.has(kId) && !kId.includes('@g.us')) {
-                        let cName = kId.replace(/@(c\.us|lid|s\.whatsapp\.net)$/, '');
+                        let cName = kId.replace(/@(cconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);.us|lid|sconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);.whatsappconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);.net)$/, '');
                         try {
                             const cRow = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(kId);
                             if (cRow && cRow.name) cName = cRow.name;
@@ -2994,22 +3073,34 @@ app.post('/api/send-documents', async (req, res) => {
 
             if (channels.whatsapp && company.whatsapp && clientReady) {
                 try {
-                    let number = company.whatsapp.replace(/\D/g, '');
+                    let number = company.whatsapp.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                     if (!number.startsWith('55')) number = '55' + number;
                     const chatId = `${number}@c.us`;
 
                     const listaArquivos = validAttachments.map(att => 
                         `• ${att.docData.docName} (${att.docData.category || 'Anexo'}, Venc: ${att.docData.dueDate || 'N/A'})`
-                    ).join('\n');
+                    ).join('const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n');
                     
-                    const whatsappSignature = whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
-                    let mensagemCompleta = `*📄 Olá!* \n\n${messageBody}`;
+                    const whatsappSignature = whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nAtenciosamente,const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nLucas Araujo";
+                    let mensagemCompleta = `*📄 Olá!* const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${messageBody}`;
                     
                     if (listaArquivos) {
-                        mensagemCompleta += `\n\n*Arquivos enviados:*\n${listaArquivos}`;
+                        mensagemCompleta += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n*Arquivos enviados:*const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${listaArquivos}`;
                     }
                     
-                    mensagemCompleta += `\n\n${whatsappSignature}`;
+                    mensagemCompleta += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${whatsappSignature}`;
 
                     await safeSendMessage(client, chatId, mensagemCompleta);
                     
@@ -3175,7 +3266,8 @@ setInterval(() => {
                             const FALLBACK_REMINDER_LID = '105403295727623@lid';
                             let chatId;
                             if (settings?.dailySummaryNumber) {
-                                let number = settings.dailySummaryNumber.replace(/\D/g, '');
+                                let number = settings.dailySummaryNumber.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                                 if (!number.startsWith('55')) number = '55' + number;
                                 chatId = `${number}@c.us`;
                             } else {
@@ -3267,23 +3359,36 @@ setInterval(() => {
 
                             if (channels.whatsapp && company.whatsapp && clientReady) {
                                 try {
-                                    let number = company.whatsapp.replace(/\D/g, '');
+                                    let number = company.whatsapp.replace(/const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);D/g, '');
                                     if (!number.startsWith('55')) number = '55' + number;
                                     const chatId = `${number}@c.us`;
                                     
-                                    let waBody = `*${msg.title}*\n\n${msg.message}`;
+                                    let waBody = `*${msg.title}*const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${msg.message}`;
 
                                     if (specificDocs.length > 0) {
-                                        waBody = `*📄 Olá!* \n\n${msg.message}\n\n*Arquivos enviados:*`;
+                                        waBody = `*📄 Olá!* const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${msg.message}const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n*Arquivos enviados:*`;
                                         const listaArquivos = attachmentsToSend.map(att => 
                                             `• ${att.docData?.docName || att.filename} (${att.docData?.category || 'Anexo'}, Venc: ${att.docData?.dueDate || 'N/A'})`
-                                        ).join('\n');
-                                        waBody += `\n${listaArquivos}`;
+                                        ).join('const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n');
+                                        waBody += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${listaArquivos}`;
                                     } else if (attachmentsToSend.length > 0) {
-                                        waBody += `\n\n*Arquivo enviado:* ${attachmentsToSend[0].filename}`;
+                                        waBody += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n*Arquivo enviado:* ${attachmentsToSend[0].filename}`;
                                     }
                                     
-                                    waBody += `\n\n${settings?.whatsappTemplate || ''}`;
+                                    waBody += `const limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);nconst limitParam = parseInt(req.query.limit) || 50;
+        await ensureWaInjection(wrapper.client);n${settings?.whatsappTemplate || ''}`;
 
                                     await safeSendMessage(waWrapper.client, chatId, waBody);
                                     
