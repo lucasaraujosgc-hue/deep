@@ -732,44 +732,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
            </button>
            
            <button
-             onClick={async () => {
-                 if(confirm('Tem certeza que deseja limpar todo o histórico de mensagens salvas localmente?')) {
-                     try {
-                         await fetch('/api/whatsapp/clear-history', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }});
-                         alert('Histórico limpo com sucesso.');
-                         window.location.reload();
-                     } catch(e: any) {
-                         alert('Erro: ' + e.message);
-                     }
-                 }
-             }}
-             title="Limpar Histórico de Mensagens"
-             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-all text-xs font-semibold"
-           >
-             <Trash2 className="w-4 h-4" />
-             <span className="hidden sm:inline">Limpar Histórico</span>
-           </button>
-           
-           <button
-             onClick={async () => {
-                 if(confirm('Sincronizar as mensagens dos últimos 60 dias pode demorar alguns minutos em background. Deseja iniciar?')) {
-                     try {
-                         const res = await fetch('/api/whatsapp/sync-60-days', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }});
-                         const data = await res.json();
-                         alert(data.message || 'Sincronização iniciada.');
-                     } catch(e: any) {
-                         alert('Erro: ' + e.message);
-                     }
-                 }
-             }}
-             title="Sincronizar Últimos 60 Dias"
-             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all text-xs font-semibold"
-           >
-             <RefreshCw className="w-4 h-4" />
-             <span className="hidden sm:inline">Sync 60 Dias</span>
-           </button>
-           
-           <button
              onClick={() => setIsTasksDrawerOpen(true)}
              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors text-xs font-semibold ml-auto"
            >
