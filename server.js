@@ -2638,15 +2638,26 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
             });
 
             const simplifiedChats = filteredChats.map(c => {
+                const chatId = c.id._serialized;
+                let msgBody = '';
+                let msgFromMe = false;
+                try {
+                    const lastMsg = db.prepare("SELECT body, fromMe, hasMedia FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(chatId);
+                    if (lastMsg) {
+                        msgBody = lastMsg.body || (lastMsg.hasMedia ? '[Mídia]' : '');
+                        msgFromMe = !!lastMsg.fromMe;
+                    }
+                } catch (e) {}
+
                 return {
-                    id: c.id._serialized,
+                    id: chatId,
                     name: c.name || c.id.user,
                     unreadCount: c.unreadCount,
                     timestamp: c.timestamp,
                     isGroup: c.isGroup,
                     profilePicUrl: null,
-                    lastMessage: '',
-                    lastMessageFromMe: false
+                    lastMessage: msgBody,
+                    lastMessageFromMe: msgFromMe
                 };
             });
             

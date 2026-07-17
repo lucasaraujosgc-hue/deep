@@ -334,10 +334,10 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
                      ...prev,
                      [id]: {
                          profilePicUrl: info.profilePicUrl,
-                         lastMessage: info.lastMessage,
-                         lastMessageFromMe: info.lastMessageFromMe,
-                         name: info.pushname,
-                         number: info.number
+                         lastMessage: info.lastMessage || prev[id]?.lastMessage,
+                         lastMessageFromMe: info.lastMessageFromMe !== undefined ? info.lastMessageFromMe : prev[id]?.lastMessageFromMe,
+                         name: info.pushname || prev[id]?.name,
+                         number: info.number || prev[id]?.number
                      }
                  }));
              } catch(e) {}
@@ -503,18 +503,13 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           }
         }, 50);
       } else {
+        // Trigger a background sync without overwriting the UI state if it fails
         const newLimit = msgLimit + 50;
         setMsgLimit(newLimit);
-        const msgs = await api.getWhatsAppMessages(chatId, newLimit);
-
-        if (msgs.length > 0) {
-          const token = localStorage.getItem('cm_auth_token');
-          fetch(`/api/whatsapp/messages/${chatId}?limit=${newLimit}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-        }
-
-        setChatMessages(msgs);
+        const token = localStorage.getItem('cm_auth_token');
+        fetch(`/api/whatsapp/messages/${chatId}?limit=${newLimit}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }).catch(() => {});
       }
     } catch (e) {
       console.error('[loadMoreMessages] Erro:', e);
@@ -681,7 +676,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   });
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 73px)', overflow: 'hidden' }}>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 130px)', overflow: 'hidden' }}>
       {/* Toolbar compacta */}
       <div className="flex items-center gap-2 bg-white px-3 py-2 border-b border-gray-100 shrink-0 flex-wrap">
            <div className="flex bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">

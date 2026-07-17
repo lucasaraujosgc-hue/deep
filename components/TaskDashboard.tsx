@@ -231,86 +231,121 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
     { name: 'Baixa', count: priorityCounts.baixa },
   ];
 
-  const renderTaskNode = (node: any, depth = 0) => {
-    const hasChildren = node.children && node.children.length > 0;
-    const isExpanded = expandedNodes.includes(node.id);
-    const overdue = isOverdue(node.dueDate) && node.status !== TaskStatus.DONE;
+  const handleUpdatePriority = async (task: Task, newPriority: TaskPriority) => {
+    const updated = { ...task, priority: newPriority };
+    try {
+      await api.saveTask(updated);
+      setTasks(tasks.map(t => t.id === task.id ? updated : t));
+    } catch(e) {}
+  };
+
+  const handleUpdateTime = async (task: Task, newTime: string) => {
+    const updated = { ...task, estimatedTime: newTime };
+    try {
+      await api.saveTask(updated);
+      setTasks(tasks.map(t => t.id === task.id ? updated : t));
+    } catch(e) {}
+  };
+
+  const renderTaskNode = (node: any) => {
+    const subtasks = node.children || [];
+    
+    // Configurações de cores da prioridade
+    const priorityColors = {
+      [TaskPriority.HIGH]: 'bg-red-50 text-red-600 border-red-200',
+      [TaskPriority.MEDIUM]: 'bg-yellow-50 text-yellow-600 border-yellow-200',
+      [TaskPriority.LOW]: 'bg-emerald-50 text-emerald-600 border-emerald-200'
+    };
 
     return (
-      <div key={node.id} className="flex flex-col">
-        <div className="flex items-start mb-3" style={{ paddingLeft: `${depth * 2}rem` }}>
-          
-          {/* Tree Toggle */}
-          <div className="pt-4 pr-2 w-8 shrink-0 flex justify-center cursor-pointer text-gray-400 hover:text-gray-600" onClick={() => hasChildren && toggleNode(node.id)}>
-             {hasChildren ? (isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />) : null}
-          </div>
-
-          {/* Kanban-style Card */}
-          <div className={`flex-1 bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-all group relative border-l-4`} style={{ borderLeftColor: node.color || '#e5e7eb', borderTopColor: '#e5e7eb', borderRightColor: '#e5e7eb', borderBottomColor: '#e5e7eb' }}>
-            
-            <div className="flex justify-between items-start mb-2">
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase text-white`} style={{ backgroundColor: node.color || '#ccc' }}>
-                {node.title.substring(0, 2).toUpperCase()}
-              </span>
-              
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                 <button onClick={() => toggleTaskStatus(node)} className={`p-1 rounded ${node.status === TaskStatus.DONE ? 'text-green-600 bg-green-100 hover:bg-green-200' : 'text-gray-400 hover:bg-gray-100'}`} title="Concluir/Pendente">
-                   <CheckSquare className="w-4 h-4" />
-                 </button>
-                 <button onClick={() => handleOpenModal(undefined, node.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Adicionar Subtarefa">
-                   <Plus className="w-4 h-4" />
-                 </button>
-                 <button onClick={() => handleOpenModal(node)} className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded" title="Editar Tarefa">
-                   <Edit className="w-4 h-4" />
-                 </button>
-                 <button onClick={() => handleDelete(node.id)} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir Tarefa">
-                   <Trash2 className="w-4 h-4" />
-                 </button>
-              </div>
-            </div>
-            
-            <h4 className={`font-semibold mb-1 ${node.status === TaskStatus.DONE ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-              {node.title}
-            </h4>
-            
-            {node.description && (
-              <div className="text-sm text-gray-500 mb-3 prose prose-sm max-w-none line-clamp-2">
-                <ReactMarkdown>{node.description}</ReactMarkdown>
-              </div>
-            )}
-            
-            <div className="flex items-center justify-between text-xs text-gray-400 border-t border-gray-100 pt-3 mt-2">
-              <div className="flex items-center gap-3">
-                {node.dueDate && (
-                    <span className={`flex items-center gap-1 ${overdue ? 'text-red-500 font-bold' : ''}`}>
-                        <Calendar className="w-3 h-3" /> {new Date(node.dueDate).toLocaleDateString('pt-BR')}
-                    </span>
-                )}
-                {node.estimatedTime && (
-                    <span className="flex items-center gap-1 text-gray-500">
-                        <Clock className="w-3 h-3" /> {node.estimatedTime}
-                    </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                 {node.status !== TaskStatus.PENDING && (
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${node.status === TaskStatus.DONE ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                       {node.status === TaskStatus.DONE ? 'Concluída' : 'Andamento'}
-                    </span>
-                 )}
-                 <span className={`flex items-center gap-1 ${node.priority === TaskPriority.HIGH ? 'text-red-500 font-bold' : node.priority === TaskPriority.MEDIUM ? 'text-orange-500 font-bold' : 'text-emerald-500 font-bold'}`}>
-                   <Flag className="w-3 h-3" /> {node.priority}
-                 </span>
-              </div>
-            </div>
+      <div key={node.id} className="bg-white rounded-xl shadow-sm border border-gray-200 mb-4 p-4 flex flex-col relative" style={{ borderLeftWidth: '4px', borderLeftColor: node.color || '#e5e7eb' }}>
+        
+        {/* Header da Tarefa: Título e Ações */}
+        <div className="flex justify-between items-start mb-2">
+          <h3 className={`text-base font-bold flex-1 ${node.status === TaskStatus.DONE ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+            {node.title}
+          </h3>
+          <div className="flex items-center gap-2 ml-4">
+             <button onClick={() => toggleTaskStatus(node)} className={`p-1.5 rounded-full ${node.status === TaskStatus.DONE ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:text-green-500 hover:bg-gray-50'}`} title="Concluir/Pendente">
+               <CheckSquare className="w-5 h-5" />
+             </button>
+             <button onClick={() => handleDelete(node.id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full" title="Excluir Tarefa">
+               <Trash2 className="w-5 h-5" />
+             </button>
           </div>
         </div>
         
-        {isExpanded && hasChildren && (
-          <div className="flex flex-col">
-            {node.children.map((child: any) => renderTaskNode(child, depth + 1))}
+        {/* Descrição */}
+        {node.description && (
+          <div className="text-sm text-gray-500 mb-4 prose prose-sm max-w-none line-clamp-2">
+            <ReactMarkdown>{node.description}</ReactMarkdown>
           </div>
         )}
+        
+        {/* Pills de Metadados */}
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Date Pill */}
+          {node.dueDate && (
+            <div className="flex items-center gap-1.5 bg-gray-50 text-gray-600 px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200">
+                <Calendar className="w-3.5 h-3.5" /> 
+                {new Date(node.dueDate).toISOString().split('T')[0]}
+            </div>
+          )}
+          
+          {/* Priority Pill */}
+          <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border ${priorityColors[node.priority as TaskPriority] || priorityColors[TaskPriority.MEDIUM]}`}>
+            <div className={`w-2 h-2 rounded-full ${node.priority === TaskPriority.HIGH ? 'bg-red-500' : node.priority === TaskPriority.MEDIUM ? 'bg-yellow-500' : 'bg-emerald-500'}`}></div>
+            <select 
+              value={node.priority} 
+              onChange={(e) => handleUpdatePriority(node, e.target.value as TaskPriority)}
+              className="bg-transparent border-none outline-none cursor-pointer appearance-none font-medium pr-4"
+              style={{ background: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") no-repeat right center / 1.5em 1.5em` }}
+            >
+              <option value={TaskPriority.LOW}>Baixa</option>
+              <option value={TaskPriority.MEDIUM}>Média</option>
+              <option value={TaskPriority.HIGH}>Alta</option>
+            </select>
+          </div>
+
+          {/* Time Tracking Pill */}
+          <div className="flex items-center gap-1.5 bg-gray-50 text-gray-500 px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200 ml-auto">
+              <Clock className="w-3.5 h-3.5" />
+              <input 
+                type="text" 
+                placeholder="Ex: min" 
+                value={node.estimatedTime || ''}
+                onChange={(e) => handleUpdateTime(node, e.target.value)}
+                className="bg-transparent border-none outline-none w-16 text-right placeholder-gray-400"
+              />
+          </div>
+        </div>
+
+        {/* Subtasks List */}
+        {subtasks.length > 0 && (
+          <div className="flex flex-col gap-2 mt-2 mb-4 border-l-2 border-gray-100 pl-4">
+            {subtasks.map((st: any) => (
+              <div key={st.id} className="flex justify-between items-center group">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => toggleTaskStatus(st)} className={`${st.status === TaskStatus.DONE ? 'text-green-500' : 'text-gray-300 hover:text-gray-400'}`}>
+                    <CheckSquare className="w-4 h-4" />
+                  </button>
+                  <span className={`text-sm ${st.status === TaskStatus.DONE ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{st.title}</span>
+                </div>
+                <button onClick={() => handleDelete(st.id)} className="opacity-0 group-hover:opacity-100 p-1 text-gray-300 hover:text-red-500 rounded-full transition-opacity">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Adicionar Subtarefa Button */}
+        <button 
+          onClick={() => handleOpenModal(undefined, node.id)} 
+          className="text-xs font-medium text-gray-400 hover:text-blue-600 flex items-center gap-1.5 mt-2 transition-colors w-fit"
+        >
+          <Plus className="w-3 h-3" /> Adicionar subtarefa
+        </button>
       </div>
     );
   };
