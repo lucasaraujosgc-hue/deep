@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Plus, MoreVertical, Trash2, CheckSquare, Clock, AlertTriangle, 
-  ChevronDown, ChevronRight, Edit, Loader2 
+  ChevronDown, ChevronRight, Edit, Loader2, Calendar, Flag
 } from 'lucide-react';
 import { Task, TaskStatus, TaskPriority, UserSettings } from '../types';
 import { api } from '../services/api';
@@ -31,9 +31,16 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
   const [estimatedTime, setEstimatedTime] = useState('');
   const [color, setColor] = useState('#2563eb');
   const [parentId, setParentId] = useState<number | null>(null);
+  
+  // Subtask Form State (used when creating a new main task)
+  const [includeSubtask, setIncludeSubtask] = useState(false);
+  const [subtaskTitle, setSubtaskTitle] = useState('');
 
   // Tree State
   const [expandedNodes, setExpandedNodes] = useState<number[]>([]);
+
+  // Filter state
+  const [companyFilter, setCompanyFilter] = useState('Todas as Empresas');
 
   useEffect(() => {
     loadTasks();
@@ -61,6 +68,8 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
       setEstimatedTime(task.estimatedTime || '');
       setColor(task.color || '#2563eb');
       setParentId(task.parentId || null);
+      setIncludeSubtask(false);
+      setSubtaskTitle('');
     } else {
       setEditingTask(null);
       setTitle('');
@@ -71,6 +80,8 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
       setEstimatedTime('');
       setColor('#2563eb');
       setParentId(parent || null);
+      setIncludeSubtask(!parent); // suggest subtask only if it's a new main task
+      setSubtaskTitle('');
     }
     setIsModalOpen(true);
   };
@@ -91,11 +102,29 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
         parentId: parentId || undefined
       };
       
+      let savedTaskId: number | undefined;
+
       if (editingTask) {
         taskData.id = editingTask.id;
+        await api.saveTask(taskData);
+      } else {
+        const saved = await api.saveTask(taskData);
+        savedTaskId = saved.id;
+      }
+
+      // Create initial subtask if requested
+      if (!editingTask && includeSubtask && subtaskTitle.trim() && savedTaskId) {
+        await api.saveTask({
+          title: subtaskTitle,
+          status: TaskStatus.PENDING,
+          priority: TaskPriority.MEDIUM,
+          color: color,
+          parentId: savedTaskId
+        });
+        // Auto-expand the new task so the subtask is visible
+        setExpandedNodes(prev => [...prev, savedTaskId!]);
       }
       
-      await api.saveTask(taskData);
       setIsModalOpen(false);
       loadTasks();
     } catch (e) {
@@ -131,10 +160,9 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
 
   const isOverdue = (date?: string) => {
     if (!date) return false;
-    return new Date(date).getTime() < new Date().getTime() - 86400000; // Passed yesterday
+    return new Date(date).getTime() < new Date().getTime() - 86400000;
   };
 
-  // Helper for hierarchical tree
   const buildTree = (allTasks: Task[], parentId?: number): any[] => {
     return allTasks
       .filter(t => (parentId === undefined ? !t.parentId : t.parentId === parentId))
@@ -146,7 +174,6 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
 
   const treeTasks = buildTree(tasks);
 
-  // Stats Data
   const statusCounts = {
     pendente: tasks.filter(t => t.status === TaskStatus.PENDING).length,
     andamento: tasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length,
@@ -178,63 +205,69 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
 
     return (
       <div key={node.id} className="flex flex-col">
-        <div 
-          className={`flex items-start gap-3 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors group px-2`}
-          style={{ paddingLeft: `${depth * 1.5 + 0.5}rem` }}
-        >
-          {/* Collapse/Expand Toggle */}
-          <div className="w-5 pt-1 cursor-pointer text-gray-400 hover:text-gray-600 shrink-0" onClick={() => hasChildren && toggleNode(node.id)}>
-             {hasChildren ? (isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : <div className="w-4 h-4" />}
+        <div className="flex items-start mb-3" style={{ paddingLeft: `${depth * 2}rem` }}>
+          
+          {/* Tree Toggle */}
+          <div className="pt-4 pr-2 w-8 shrink-0 flex justify-center cursor-pointer text-gray-400 hover:text-gray-600" onClick={() => hasChildren && toggleNode(node.id)}>
+             {hasChildren ? (isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />) : null}
           </div>
 
-          {/* Color Indicator & Checkbox */}
-          <div className="pt-1 flex items-center gap-2">
-             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: node.color || '#ccc' }}></div>
-             <button onClick={() => toggleTaskStatus(node)} className={`w-5 h-5 rounded border flex items-center justify-center ${node.status === TaskStatus.DONE ? 'bg-green-500 border-green-500' : 'border-gray-300'}`}>
-               {node.status === TaskStatus.DONE && <CheckSquare className="w-4 h-4 text-white" />}
-             </button>
-          </div>
-
-          <div className="flex-1 min-w-0">
-             <div className="flex items-center gap-2">
-                 <h4 className={`font-medium text-gray-800 ${node.status === TaskStatus.DONE ? 'line-through text-gray-400' : ''}`}>
-                   {node.title}
-                 </h4>
-                 {overdue && <span className="bg-red-100 text-red-600 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Atrasada</span>}
-                 {node.priority === TaskPriority.HIGH && <span className="text-red-500 text-xs font-bold border border-red-200 bg-red-50 px-1.5 rounded">ALTA</span>}
-             </div>
-             
-             {node.description && (
-               <div className="text-sm text-gray-500 mt-1 prose prose-sm max-w-none">
-                 <ReactMarkdown>{node.description}</ReactMarkdown>
-               </div>
-             )}
-
-             <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-gray-500">
-               {node.dueDate && (
-                 <span className={`flex items-center gap-1 ${overdue ? 'text-red-600 font-medium' : ''}`}>
-                   <Clock className="w-3 h-3" /> 
-                   {new Date(node.dueDate).toLocaleDateString('pt-BR')}
+          {/* Kanban-style Card */}
+          <div className={`flex-1 bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-all group relative border-gray-200`}>
+            
+            <div className="flex justify-between items-start mb-2">
+              <span className={`w-8 h-1 rounded-full`} style={{ backgroundColor: node.color || '#ccc' }}></span>
+              
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                 <button onClick={() => toggleTaskStatus(node)} className={`p-1 rounded ${node.status === TaskStatus.DONE ? 'text-green-600 bg-green-100 hover:bg-green-200' : 'text-gray-400 hover:bg-gray-100'}`} title="Concluir/Pendente">
+                   <CheckSquare className="w-4 h-4" />
+                 </button>
+                 <button onClick={() => handleOpenModal(undefined, node.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Adicionar Subtarefa">
+                   <Plus className="w-4 h-4" />
+                 </button>
+                 <button onClick={() => handleOpenModal(node)} className="p-1 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded" title="Editar Tarefa">
+                   <Edit className="w-4 h-4" />
+                 </button>
+                 <button onClick={() => handleDelete(node.id)} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir Tarefa">
+                   <Trash2 className="w-4 h-4" />
+                 </button>
+              </div>
+            </div>
+            
+            <h4 className={`font-semibold mb-1 ${node.status === TaskStatus.DONE ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+              {node.title}
+            </h4>
+            
+            {node.description && (
+              <div className="text-sm text-gray-500 mb-3 prose prose-sm max-w-none line-clamp-2">
+                <ReactMarkdown>{node.description}</ReactMarkdown>
+              </div>
+            )}
+            
+            <div className="flex items-center justify-between text-xs text-gray-400 border-t border-gray-100 pt-3 mt-2">
+              <div className="flex items-center gap-3">
+                {node.dueDate && (
+                    <span className={`flex items-center gap-1 ${overdue ? 'text-red-500 font-bold' : ''}`}>
+                        <Calendar className="w-3 h-3" /> {new Date(node.dueDate).toLocaleDateString('pt-BR')}
+                    </span>
+                )}
+                {node.estimatedTime && (
+                    <span className="flex items-center gap-1 text-gray-500">
+                        <Clock className="w-3 h-3" /> {node.estimatedTime}
+                    </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                 {node.status !== TaskStatus.PENDING && (
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${node.status === TaskStatus.DONE ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                       {node.status === TaskStatus.DONE ? 'Concluída' : 'Andamento'}
+                    </span>
+                 )}
+                 <span className={`flex items-center gap-1 ${node.priority === TaskPriority.HIGH ? 'text-red-500 font-bold' : ''}`}>
+                   <Flag className="w-3 h-3" /> {node.priority}
                  </span>
-               )}
-               {node.estimatedTime && (
-                 <span className="flex items-center gap-1">
-                   <span className="font-semibold text-gray-400">Tempo:</span> {node.estimatedTime}
-                 </span>
-               )}
-             </div>
-          </div>
-
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2 shrink-0 pr-2">
-             <button onClick={() => handleOpenModal(undefined, node.id)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Adicionar Subtarefa">
-               <Plus className="w-4 h-4" />
-             </button>
-             <button onClick={() => handleOpenModal(node)} className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded" title="Editar Tarefa">
-               <Edit className="w-4 h-4" />
-             </button>
-             <button onClick={() => handleDelete(node.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir Tarefa">
-               <Trash2 className="w-4 h-4" />
-             </button>
+              </div>
+            </div>
           </div>
         </div>
         
@@ -248,94 +281,110 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
   };
 
   if (loading) {
-     return <div className="h-[800px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
+     return <div className="h-full flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
   }
 
   return (
-    <div className="h-full flex flex-col p-2 space-y-6">
+    <div className="h-full flex flex-col p-2 space-y-4">
+      {/* Top Bar with Filter */}
       <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Painel de Gestão Completa de Tarefas</h1>
           <p className="text-gray-500">Visualize seu progresso e gerencie sua árvore de atividades.</p>
         </div>
-        <button 
-          onClick={() => handleOpenModal()}
-          className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-blue-200 flex items-center gap-2 hover:bg-blue-700 hover:shadow-md transition-all"
-        >
-          <Plus className="w-5 h-5" /> Nova Tarefa Principal
-        </button>
+        <div className="flex gap-3">
+          <select 
+            value={companyFilter}
+            onChange={(e) => setCompanyFilter(e.target.value)}
+            className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option>Todas as Empresas</option>
+            {/* Can populate dynamically if needed */}
+          </select>
+          <button 
+            onClick={() => handleOpenModal()}
+            className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-blue-200 flex items-center gap-2 hover:bg-blue-700 hover:shadow-md transition-all"
+          >
+            <Plus className="w-5 h-5" /> Nova Tarefa
+          </button>
+        </div>
       </div>
 
-      {/* Analytics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 self-start">Progresso (Status)</h3>
-            <div className="h-64 w-full">
-              {tasks.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-gray-400">Sem dados</div>
-              )}
+      <div className="flex flex-col md:flex-row gap-6 flex-1 overflow-hidden pb-4">
+         
+         {/* Left Side: Task Tree */}
+         <div className="w-full md:w-2/3 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-gray-800">Árvore de Tarefas Hierárquica</h3>
+                <span className="text-sm font-medium text-gray-500 bg-gray-200 px-2.5 py-0.5 rounded-full">{tasks.length} total</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
+                {treeTasks.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+                     <AlertTriangle className="w-10 h-10 text-gray-300 mb-3" />
+                     <p>Nenhuma tarefa cadastrada. Crie sua primeira tarefa principal.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                     {treeTasks.map(task => renderTaskNode(task))}
+                  </div>
+                )}
             </div>
          </div>
 
-         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 self-start">Tarefas por Prioridade</h3>
-            <div className="h-64 w-full">
-              {tasks.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={barData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip cursor={{ fill: 'transparent' }} />
-                    <Bar dataKey="count" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={40}>
-                       {barData.map((entry, index) => {
-                         const colors = { Alta: '#ef4444', Média: '#f59e0b', Baixa: '#10b981' };
-                         return <Cell key={`cell-${index}`} fill={colors[entry.name as keyof typeof colors]} />;
-                       })}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-gray-400">Sem dados</div>
-              )}
-            </div>
-         </div>
-      </div>
+         {/* Right Side: Charts stacked */}
+         <div className="w-full md:w-1/3 flex flex-col gap-6 overflow-y-auto pr-2">
+             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
+                <h3 className="text-lg font-semibold text-gray-800 mb-4 self-start">Progresso (Status)</h3>
+                <div className="h-64 w-full">
+                  {tasks.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-gray-400">Sem dados</div>
+                  )}
+                </div>
+             </div>
 
-      {/* Task Tree Section */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex-1 overflow-hidden flex flex-col">
-         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-            <h3 className="text-lg font-semibold text-gray-800">Árvore de Tarefas Hierárquica</h3>
+             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
+                <h3 className="text-lg font-semibold text-gray-800 mb-4 self-start">Tarefas por Prioridade</h3>
+                <div className="h-64 w-full">
+                  {tasks.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={barData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip cursor={{ fill: 'transparent' }} />
+                        <Bar dataKey="count" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={40}>
+                           {barData.map((entry, index) => {
+                             const colors = { Alta: '#ef4444', Média: '#f59e0b', Baixa: '#10b981' };
+                             return <Cell key={`cell-${index}`} fill={colors[entry.name as keyof typeof colors]} />;
+                           })}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-gray-400">Sem dados</div>
+                  )}
+                </div>
+             </div>
          </div>
-         <div className="flex-1 overflow-y-auto p-4">
-            {treeTasks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400">
-                 <AlertTriangle className="w-10 h-10 text-gray-300 mb-3" />
-                 <p>Nenhuma tarefa cadastrada. Crie sua primeira tarefa principal.</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                 {treeTasks.map(task => renderTaskNode(task))}
-              </div>
-            )}
-         </div>
+
       </div>
 
       {/* Modal Nova/Editar Tarefa */}
@@ -371,7 +420,7 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
                      value={description}
                      onChange={e => setDescription(e.target.value)}
                      className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none h-32 resize-none"
-                     placeholder="- Item 1&#10;- Item 2"
+                     placeholder="- Item 1\n- Item 2"
                    />
                  </div>
 
@@ -434,6 +483,34 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
                      <span className="text-sm text-gray-500">Selecione uma cor para organizar visualmente</span>
                    </div>
                  </div>
+                 
+                 {!editingTask && !parentId && (
+                   <div className="md:col-span-2 pt-2 border-t border-slate-100">
+                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-3 cursor-pointer">
+                       <input 
+                         type="checkbox" 
+                         checked={includeSubtask}
+                         onChange={(e) => setIncludeSubtask(e.target.checked)}
+                         className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                       />
+                       Já adicionar uma subtarefa inicial
+                     </label>
+                     
+                     {includeSubtask && (
+                        <div>
+                          <input 
+                             type="text" 
+                             value={subtaskTitle}
+                             onChange={e => setSubtaskTitle(e.target.value)}
+                             className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none"
+                             placeholder="Título da subtarefa..."
+                             required={includeSubtask}
+                          />
+                        </div>
+                     )}
+                   </div>
+                 )}
+                 
               </div>
               
               <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">

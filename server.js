@@ -2645,14 +2645,53 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
             // atualizado seu front-end e o whatsapp-web.js não conseguir mais localizar
             // as funções internas do Store (getChatModel/getChats). Logamos a stack
             // completa aqui porque o front só recebe uma mensagem minificada e curta.
-            log(`[WhatsApp Chats] Falha ao buscar chats para ${req.user}`, e);
-            const isStoreMismatch = /Evaluation failed/i.test(e.message || '') || /getChatModel|WWebJS/i.test(e.stack || '');
-            res.status(500).json({
-                error: e.message,
-                hint: isStoreMismatch
-                    ? 'Provável incompatibilidade entre a versão do WhatsApp Web e a lib whatsapp-web.js. Tente resetar a sessão (/api/whatsapp/reset) e, se persistir, fixar WA_WEB_VERSION no .env.'
-                    : undefined
-            });
+            log(`[WhatsApp Chats] Falha ao buscar chats via client.getChats() para ${req.user}`, e);
+
+            // FALLBACK: monta a lista de conversas a partir do banco local, que é
+            // alimentado pelos eventos 'message'/'message_create' (mecanismo diferente
+            // do getChats(), não depende do Store injetado via evaluate e por isso
+            // continua funcionando mesmo quando getChats() quebra).
+            try {
+                const now = Date.now() / 1000;
+                const rows = db.prepare(`
+                    SELECT chatId,
+                           MAX(timestamp) as timestamp,
+                           COUNT(*) as totalMsgs
+                    FROM whatsapp_messages
+                    WHERE chatId NOT LIKE '%@g.us'
+                    GROUP BY chatId
+                `).all();
+
+                const fallbackChats = rows
+                    .filter(r => kanbanCards.includes(r.chatId) || (r.timestamp && (now - r.timestamp) < 86400 * 7))
+                    .map(r => {
+                        const contact = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(r.chatId);
+                        const lastMsg = db.prepare("SELECT body, fromMe, hasMedia FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(r.chatId);
+                        return {
+                            id: r.chatId,
+                            name: (contact && contact.name) || r.chatId,
+                            unreadCount: 0, // não é possível saber com precisão sem o Store ao vivo
+                            timestamp: r.timestamp,
+                            isGroup: false,
+                            profilePicUrl: null,
+                            lastMessage: lastMsg ? (lastMsg.body || (lastMsg.hasMedia ? '[Mídia]' : '')) : '',
+                            lastMessageFromMe: !!(lastMsg && lastMsg.fromMe)
+                        };
+                    })
+                    .sort((a, b) => b.timestamp - a.timestamp);
+
+                log(`[WhatsApp Chats] Fallback via banco local usado: ${fallbackChats.length} chats (client.getChats() indisponível: ${e.message}).`);
+                return res.json(fallbackChats);
+            } catch (dbErr) {
+                log(`[WhatsApp Chats] Fallback via banco local também falhou`, dbErr);
+                const isStoreMismatch = /Evaluation failed/i.test(e.message || '') || /getChatModel|WWebJS/i.test(e.stack || '');
+                return res.status(500).json({
+                    error: e.message,
+                    hint: isStoreMismatch
+                        ? 'Provável incompatibilidade entre a versão do WhatsApp Web e a lib whatsapp-web.js.'
+                        : undefined
+                });
+            }
         }
     } catch(e) { res.status(500).json({error: e.message}); }
 });
