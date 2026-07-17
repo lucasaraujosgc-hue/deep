@@ -40,7 +40,9 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
   const [expandedNodes, setExpandedNodes] = useState<number[]>([]);
 
   // Filter state
-  const [companyFilter, setCompanyFilter] = useState('Todas as Empresas');
+  const [filterStatus, setFilterStatus] = useState('ALL'); // ALL, PENDING
+  const [filterPriority, setFilterPriority] = useState('ALL'); // ALL, alta, media, baixa
+  const [searchTitle, setSearchTitle] = useState('');
 
   useEffect(() => {
     loadTasks();
@@ -163,8 +165,39 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
     return new Date(date).getTime() < new Date().getTime() - 86400000;
   };
 
+  const matchesFilter = (t: Task) => {
+    if (filterStatus === 'PENDING' && t.status === TaskStatus.DONE) return false;
+    if (filterPriority !== 'ALL' && t.priority !== filterPriority) return false;
+    if (searchTitle && !t.title.toLowerCase().includes(searchTitle.toLowerCase())) return false;
+    return true;
+  };
+
+  const getVisibleNodeIds = () => {
+    const visibleIds = new Set<number>();
+    
+    // Function to add a task and all its parents
+    const addWithParents = (taskId: number) => {
+      let currentId: number | undefined = taskId;
+      while (currentId !== undefined && !visibleIds.has(currentId)) {
+        visibleIds.add(currentId);
+        const t = tasks.find(x => x.id === currentId);
+        currentId = t?.parentId;
+      }
+    };
+
+    tasks.forEach(t => {
+      if (matchesFilter(t)) {
+        addWithParents(t.id);
+      }
+    });
+    return visibleIds;
+  };
+
+  const visibleIds = getVisibleNodeIds();
+
   const buildTree = (allTasks: Task[], parentId?: number): any[] => {
     return allTasks
+      .filter(t => visibleIds.has(t.id))
       .filter(t => (parentId === undefined ? !t.parentId : t.parentId === parentId))
       .map(t => ({
         ...t,
@@ -213,10 +246,12 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
           </div>
 
           {/* Kanban-style Card */}
-          <div className={`flex-1 bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-all group relative border-gray-200`}>
+          <div className={`flex-1 bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-all group relative border-l-4`} style={{ borderLeftColor: node.color || '#e5e7eb', borderTopColor: '#e5e7eb', borderRightColor: '#e5e7eb', borderBottomColor: '#e5e7eb' }}>
             
             <div className="flex justify-between items-start mb-2">
-              <span className={`w-8 h-1 rounded-full`} style={{ backgroundColor: node.color || '#ccc' }}></span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase text-white`} style={{ backgroundColor: node.color || '#ccc' }}>
+                {node.title.substring(0, 2).toUpperCase()}
+              </span>
               
               <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                  <button onClick={() => toggleTaskStatus(node)} className={`p-1 rounded ${node.status === TaskStatus.DONE ? 'text-green-600 bg-green-100 hover:bg-green-200' : 'text-gray-400 hover:bg-gray-100'}`} title="Concluir/Pendente">
@@ -263,7 +298,7 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
                        {node.status === TaskStatus.DONE ? 'Concluída' : 'Andamento'}
                     </span>
                  )}
-                 <span className={`flex items-center gap-1 ${node.priority === TaskPriority.HIGH ? 'text-red-500 font-bold' : ''}`}>
+                 <span className={`flex items-center gap-1 ${node.priority === TaskPriority.HIGH ? 'text-red-500 font-bold' : node.priority === TaskPriority.MEDIUM ? 'text-orange-500 font-bold' : 'text-emerald-500 font-bold'}`}>
                    <Flag className="w-3 h-3" /> {node.priority}
                  </span>
               </div>
@@ -292,18 +327,35 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
           <h1 className="text-2xl font-bold text-gray-800">Painel de Gestão Completa de Tarefas</h1>
           <p className="text-gray-500">Visualize seu progresso e gerencie sua árvore de atividades.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col md:flex-row gap-3">
           <select 
-            value={companyFilter}
-            onChange={(e) => setCompanyFilter(e.target.value)}
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
             className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           >
-            <option>Todas as Empresas</option>
-            {/* Can populate dynamically if needed */}
+            <option value="ALL">Todos os Status</option>
+            <option value="PENDING">Somente Pendentes/Andamento</option>
           </select>
+          <select 
+            value={filterPriority}
+            onChange={(e) => setFilterPriority(e.target.value)}
+            className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="ALL">Todas Prioridades</option>
+            <option value="alta">Prioridade Alta</option>
+            <option value="media">Prioridade Média</option>
+            <option value="baixa">Prioridade Baixa</option>
+          </select>
+          <input 
+            type="text"
+            placeholder="Buscar por título..."
+            value={searchTitle}
+            onChange={(e) => setSearchTitle(e.target.value)}
+            className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          />
           <button 
             onClick={() => handleOpenModal()}
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-blue-200 flex items-center gap-2 hover:bg-blue-700 hover:shadow-md transition-all"
+            className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-blue-200 flex items-center gap-2 hover:bg-blue-700 hover:shadow-md transition-all whitespace-nowrap ml-2"
           >
             <Plus className="w-5 h-5" /> Nova Tarefa
           </button>
@@ -419,7 +471,7 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
                    <textarea 
                      value={description}
                      onChange={e => setDescription(e.target.value)}
-                     className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none h-32 resize-none"
+                     className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none h-20 resize-none"
                      placeholder="- Item 1\n- Item 2"
                    />
                  </div>
@@ -486,28 +538,19 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
                  
                  {!editingTask && !parentId && (
                    <div className="md:col-span-2 pt-2 border-t border-slate-100">
-                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-3 cursor-pointer">
-                       <input 
-                         type="checkbox" 
-                         checked={includeSubtask}
-                         onChange={(e) => setIncludeSubtask(e.target.checked)}
-                         className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
-                       />
-                       Já adicionar uma subtarefa inicial
+                     <label className="block text-sm font-medium text-slate-700 mb-1">
+                       Já adicionar uma subtarefa inicial (Opcional)
                      </label>
-                     
-                     {includeSubtask && (
-                        <div>
-                          <input 
-                             type="text" 
-                             value={subtaskTitle}
-                             onChange={e => setSubtaskTitle(e.target.value)}
-                             className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none"
-                             placeholder="Título da subtarefa..."
-                             required={includeSubtask}
-                          />
-                        </div>
-                     )}
+                     <input 
+                        type="text" 
+                        value={subtaskTitle}
+                        onChange={e => {
+                          setSubtaskTitle(e.target.value);
+                          setIncludeSubtask(!!e.target.value.trim());
+                        }}
+                        className="w-full border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none"
+                        placeholder="Título da subtarefa..."
+                     />
                    </div>
                  )}
                  

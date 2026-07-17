@@ -2578,21 +2578,34 @@ app.get('/api/whatsapp/chat-info/:chatId', authenticateToken, async (req, res) =
         
         let lastMessage = '';
         let lastMessageFromMe = false;
+        let lastMessageTimestamp = null;
         try {
             const chat = await wrapper.client.getChatById(chatId);
             const msgs = await chat.fetchMessages({limit: 1});
             if (msgs && msgs.length > 0) {
                 lastMessage = msgs[0].body || (msgs[0].hasMedia ? '[Mídia]' : '');
                 lastMessageFromMe = msgs[0].fromMe;
+                lastMessageTimestamp = msgs[0].timestamp;
             }
-        } catch(e) {}
+        } catch(e) {
+            try {
+                const db = getDb(req.user);
+                const lastMsg = db.prepare("SELECT body, fromMe, hasMedia, timestamp FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(chatId);
+                if (lastMsg) {
+                    lastMessage = lastMsg.body || (lastMsg.hasMedia ? '[Mídia]' : '');
+                    lastMessageFromMe = !!lastMsg.fromMe;
+                    lastMessageTimestamp = lastMsg.timestamp;
+                }
+            } catch(dbErr) {}
+        }
         
         res.json({
             profilePicUrl,
             pushname: contact ? (contact.pushname || contact.name) : null,
             number: contact ? contact.number : null,
             lastMessage,
-            lastMessageFromMe
+            lastMessageFromMe,
+            lastMessageTimestamp
         });
     } catch(e) {
         res.status(500).json({error: e.message});
