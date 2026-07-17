@@ -1432,8 +1432,21 @@ const getWaClientWrapper = (username) => {
 
         const puppeteerExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser';
         
+        // WA_WEB_VERSION permite travar a versão do WhatsApp Web usada pelo Puppeteer.
+        // Isso evita que uma atualização recente do WhatsApp Web quebre o whatsapp-web.js
+        // (ex.: erros "Evaluation failed" no getChats/getChatModel).
+        // Defina no .env, ex: WA_WEB_VERSION=2.2412.54
+        // Lista de versões disponíveis: https://github.com/wppconnect-team/wa-version/tree/main/html
+        const webVersionCache = process.env.WA_WEB_VERSION
+            ? {
+                type: 'remote',
+                remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${process.env.WA_WEB_VERSION}.html`,
+              }
+            : { type: 'none' }; // 'none' = usa a versão embutida na própria WhatsApp Web ao carregar, sem cache
+
         const client = new Client({
             authStrategy: new LocalAuth({ clientId: username, dataPath: authPath }), 
+            webVersionCache,
             puppeteer: {
                 headless: true,
                 executablePath: puppeteerExecutablePath,
@@ -2628,7 +2641,18 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
 
             res.json(simplifiedChats);
         } catch(e) {
-            res.status(500).json({error: e.message});
+            // "Evaluation failed: ..." é a assinatura clássica de o WhatsApp Web ter
+            // atualizado seu front-end e o whatsapp-web.js não conseguir mais localizar
+            // as funções internas do Store (getChatModel/getChats). Logamos a stack
+            // completa aqui porque o front só recebe uma mensagem minificada e curta.
+            log(`[WhatsApp Chats] Falha ao buscar chats para ${req.user}`, e);
+            const isStoreMismatch = /Evaluation failed/i.test(e.message || '') || /getChatModel|WWebJS/i.test(e.stack || '');
+            res.status(500).json({
+                error: e.message,
+                hint: isStoreMismatch
+                    ? 'Provável incompatibilidade entre a versão do WhatsApp Web e a lib whatsapp-web.js. Tente resetar a sessão (/api/whatsapp/reset) e, se persistir, fixar WA_WEB_VERSION no .env.'
+                    : undefined
+            });
         }
     } catch(e) { res.status(500).json({error: e.message}); }
 });
