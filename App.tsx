@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
+import TaskDashboard from './components/TaskDashboard';
 import Kanban from './components/Kanban';
 import Companies from './components/Companies';
 import WhatsAppConnect from './components/WhatsAppConnect';
@@ -150,11 +151,13 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     switch (activePage) {
-      case 'dashboard':
+      case 'kanban':
         return <Dashboard 
                  userSettings={userSettings} 
                  onSaveSettings={setUserSettings} 
                />;
+      case 'dashboard':
+        return <TaskDashboard userSettings={userSettings} />;
       case 'companies':
         return <Companies 
                  userSettings={userSettings} 
