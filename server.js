@@ -62,23 +62,12 @@ if (process.env.GEMINI_API_KEY) {
     log("AI: GEMINI_API_KEY não encontrada. O assistente inteligente estará desativado.");
 }
 
-import { createServer as createViteServer } from 'vite';
-
 // --- CONFIGURAÇÃO DO EXPRESS ---
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-let vite;
-if (process.env.NODE_ENV !== 'production') {
-    vite = await createViteServer({
-        server: { middlewareMode: true, allowedHosts: true },
-        appType: 'spa',
-    });
-    app.use(vite.middlewares);
-} else {
-    // Servir arquivos estáticos do frontend (pasta dist criada pelo Vite)
-    app.use(express.static(path.join(__dirname, 'dist')));
-}
+// Servir arquivos estáticos do frontend (pasta dist criada pelo Vite)
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- HELPER: Puppeteer Lock Cleaner ---
 const cleanPuppeteerLocks = (dir) => {
@@ -1470,18 +1459,14 @@ const getWaClientWrapper = (username) => {
                 return;
             }
 
-            let sender = msg.from;
-            let chatId = msg.from;
+            const sender = msg.from;
+            const chatId = msg.from;
             log(`[WhatsApp Inbound] Mensagem recebida de: ${sender} | Body: ${msg.body?.substring(0, 30)}...`);
 
             let contactName = null;
             try {
                 const contact = await msg.getContact();
                 contactName = contact.name || contact.pushname || contact.number || sender;
-                if (contact && contact.id && contact.id._serialized && contact.id._serialized.includes('@c.us')) {
-                    sender = contact.id._serialized;
-                    chatId = contact.id._serialized;
-                }
             } catch (e) { contactName = sender; }
 
             const db = getDb(username);
@@ -1616,14 +1601,11 @@ const getWaClientWrapper = (username) => {
         // ============================================================
         client.on('message_create', async (msg) => {
             if (msg.fromMe) {
-                let chatId = msg.to;
+                const chatId = msg.to;
                 let contactName = null;
                 try {
                     const contact = await msg.getContact();
                     contactName = contact.name || contact.pushname || contact.number || chatId;
-                    if (contact && contact.id && contact.id._serialized && contact.id._serialized.includes('@c.us')) {
-                        chatId = contact.id._serialized;
-                    }
                 } catch (e) { contactName = chatId; }
 
                 const db = getDb(username);
@@ -1710,7 +1692,7 @@ const getWaClientWrapper = (username) => {
                     log(`[WhatsApp Cache] ${seeded} contatos populados no cache ao conectar.`);
                 }
             } catch (e) {
-                log(`[WhatsApp Cache] Aviso: Não foi possível popular cache via getChats() (provável instabilidade do WA Web): ${e.message}`);
+                log(`[WhatsApp Cache] Erro ao popular cache na inicialização: ${e.message}`);
             }
         });
         
@@ -2317,16 +2299,6 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
 // ============================================================
 // SEÇÃO 4 — Rota /api/whatsapp/messages-db/:chatId
 // ============================================================
-app.get('/api/whatsapp/debug-db', authenticateToken, (req, res) => {
-    try {
-        const db = getDb(req.user);
-        const rows = db.prepare("SELECT * FROM whatsapp_messages ORDER BY timestamp DESC LIMIT 5").all();
-        res.json(rows);
-    } catch(e) {
-        res.status(500).json({error: e.message});
-    }
-});
-
 app.get('/api/whatsapp/messages-db/:chatId', authenticateToken, async (req, res) => {
     try {
         const db = getDb(req.user);
@@ -2510,37 +2482,19 @@ app.post('/api/whatsapp/send-chat', upload.single('media'), async (req, res) => 
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
         
         let content = message || '';
-        let msgObj;
         if (req.file) {
             const fileData = fs.readFileSync(req.file.path).toString('base64');
             const media = new MessageMedia(req.file.mimetype, fileData, req.file.originalname);
-            msgObj = await safeSendMessage(wrapper.client, chatId, content ? media : media, content ? {caption: content} : {});
+            await safeSendMessage(wrapper.client, chatId, content ? media : media, content ? {caption: content} : {});
             const db = getDb(req.user);
             if(db) {
                 db.prepare('INSERT INTO file_gallery (serverFilename, originalName, mimeType, size, contact, channel, direction, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
                     .run(req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, chatId, 'whatsapp', 'sent', new Date().toISOString());
             }
         } else {
-            if(content) msgObj = await safeSendMessage(wrapper.client, chatId, content);
+            if(content) await safeSendMessage(wrapper.client, chatId, content);
         }
-        
-        if (msgObj) {
-            const db = getDb(req.user);
-            if (db) {
-                saveMessageToDb(db, {
-                    id: msgObj.id._serialized,
-                    chatId,
-                    sender: wrapper.client.info?.wid?._serialized || '',
-                    timestamp: msgObj.timestamp,
-                    body: msgObj.body || '',
-                    fromMe: true,
-                    hasMedia: msgObj.hasMedia,
-                    type: msgObj.type
-                });
-            }
-        }
-        
-        res.json({success: true, msg: msgObj ? { id: msgObj.id._serialized, timestamp: msgObj.timestamp, body: msgObj.body, type: msgObj.type, hasMedia: msgObj.hasMedia } : null});
+        res.json({success: true});
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
@@ -2618,16 +2572,7 @@ app.get('/api/whatsapp/chat-info/:chatId', authenticateToken, async (req, res) =
                 lastMessage = msgs[0].body || (msgs[0].hasMedia ? '[Mídia]' : '');
                 lastMessageFromMe = msgs[0].fromMe;
             }
-        } catch(e) {
-            try {
-                const db = getDb(req.user);
-                const dbMsg = db.prepare("SELECT body, hasMedia, type, fromMe FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(chatId);
-                if (dbMsg) {
-                    lastMessage = dbMsg.body || (dbMsg.hasMedia || (dbMsg.type && dbMsg.type !== 'chat') ? '[Mídia]' : '');
-                    lastMessageFromMe = dbMsg.fromMe === 1;
-                }
-            } catch(dbErr) {}
-        }
+        } catch(e) {}
         
         res.json({
             profilePicUrl,
@@ -2657,10 +2602,7 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
         } catch(e) {}
         
         try {
-            const chats = await Promise.race([
-                wrapper.client.getChats(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-            ]);
+            const chats = await wrapper.client.getChats();
             const now = Date.now() / 1000;
             const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
                 if (kanbanCards.includes(c.id._serialized)) return true;
@@ -2686,87 +2628,7 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
 
             res.json(simplifiedChats);
         } catch(e) {
-            log(`[API whatsapp/chats] Error fetching chats: ${e.message}. Using fallback.`);
-            try {
-                const fallbackChats = [];
-                const fallbackMap = new Map();
-                
-                // Add all cards from kanban
-                for (const id of kanbanCards) {
-                    if (id.includes('@g.us')) continue; // skip groups
-                    let name = id;
-                    try {
-                        const contactRow = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(id);
-                        if (contactRow && contactRow.name) name = contactRow.name;
-                    } catch(err) {}
-                    
-                    let timestamp = Date.now() / 1000;
-                    let lastMessage = '';
-                    let lastMessageFromMe = false;
-                    try {
-                        const msgRow = db.prepare("SELECT timestamp as ts, body, hasMedia, type, fromMe FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(id);
-                        if (msgRow) {
-                            timestamp = msgRow.ts || timestamp;
-                            lastMessage = msgRow.body || (msgRow.hasMedia || (msgRow.type && msgRow.type !== 'chat') ? '[Mídia]' : '');
-                            lastMessageFromMe = msgRow.fromMe === 1;
-                        }
-                    } catch(err) {}
-
-                    const cData = {
-                        id,
-                        name,
-                        unreadCount: 0,
-                        timestamp,
-                        isGroup: false,
-                        profilePicUrl: null,
-                        lastMessage,
-                        lastMessageFromMe
-                    };
-                    fallbackMap.set(id, cData);
-                }
-                
-                // Add recent chats from db
-                try {
-                    const recentRows = db.prepare("SELECT chatId, contactName, MAX(timestamp) as ts FROM whatsapp_messages WHERE chatId NOT LIKE '%@g.us' GROUP BY chatId ORDER BY ts DESC").all();
-                    for (const row of recentRows) {
-                        if (!fallbackMap.has(row.chatId)) {
-                            let name = row.contactName || row.chatId;
-                            try {
-                                const contactRow = db.prepare("SELECT name FROM whatsapp_contacts WHERE contact_id = ?").get(row.chatId);
-                                if (contactRow && contactRow.name) name = contactRow.name;
-                            } catch(err) {}
-                            
-                            let lastMessage = '';
-                            let lastMessageFromMe = false;
-                            try {
-                                const msgRow = db.prepare("SELECT body, hasMedia, type, fromMe FROM whatsapp_messages WHERE chatId = ? ORDER BY timestamp DESC LIMIT 1").get(row.chatId);
-                                if (msgRow) {
-                                    lastMessage = msgRow.body || (msgRow.hasMedia || (msgRow.type && msgRow.type !== 'chat') ? '[Mídia]' : '');
-                                    lastMessageFromMe = msgRow.fromMe === 1;
-                                }
-                            } catch(err) {}
-                            
-                            fallbackMap.set(row.chatId, {
-                                id: row.chatId,
-                                name,
-                                unreadCount: 0,
-                                timestamp: row.ts,
-                                isGroup: false,
-                                profilePicUrl: null,
-                                lastMessage,
-                                lastMessageFromMe
-                            });
-                        }
-                    }
-                } catch(err) {}
-                
-                const finalChats = Array.from(fallbackMap.values());
-                finalChats.sort((a, b) => b.timestamp - a.timestamp);
-                res.json(finalChats);
-            } catch(fallbackErr) {
-                log(`[API whatsapp/chats] Fallback error: ${fallbackErr.message}`);
-                res.json([]);
-            }
+            res.status(500).json({error: e.message});
         }
     } catch(e) { res.status(500).json({error: e.message}); }
 });

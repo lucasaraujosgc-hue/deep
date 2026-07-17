@@ -7,7 +7,6 @@ import {
 import { UserSettings, WaKanbanState, WaKanbanColumn, WaKanbanTag, WaKanbanCard } from '../types';
 import { api } from '../services/api';
 import ReactMarkdown from 'react-markdown';
-import TaskManagementDashboard from './TaskManagementDashboard';
 
 // Helper: resolve display label for a chatId
 // If chatId starts with 55<digits>@c.us → show formatted phone number
@@ -40,7 +39,6 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
-  const [taskModeEnabled, setTaskModeEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [waChats, setWaChats] = useState<any[]>([]);
   const [contactNumber, setContactNumber] = useState('');
@@ -102,10 +100,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   };
 
   const loadWaChats = async () => {
-    if (taskModeEnabled) {
-      setLoading(false);
-      return;
-    }
     try {
       const chats = await api.getWhatsAppChats();
       setWaChats(chats);
@@ -289,12 +283,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
 
     return () => { es.close(); };
   }, []);
-
-  useEffect(() => {
-    if (!taskModeEnabled && waChats.length === 0) {
-      loadWaChats();
-    }
-  }, [taskModeEnabled]);
 
   const firstColId = kanbanState.columns[0]?.id;
   const mergedCards = waChats.map(chat => {
@@ -748,25 +736,11 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors text-xs font-semibold ml-auto"
            >
              <CheckCircle2 className="w-4 h-4" />
-             <span>Tarefas Draw</span>
-           </button>
-           <button
-             onClick={() => setTaskModeEnabled(!taskModeEnabled)}
-             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
-               taskModeEnabled 
-                ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100' 
-                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-             }`}
-           >
-             <CheckCircle2 className="w-4 h-4" />
-             <span>Modo Gestão</span>
+             <span>Tarefas</span>
            </button>
       </div>
 
-      {/* Conditional Dashboard/Kanban */}
-      {taskModeEnabled ? (
-          <TaskManagementDashboard />
-      ) : (
+      {/* Kanban Board */}
       <div className="flex-1 overflow-x-auto flex gap-3 p-3">
           {kanbanState.columns.map(col => {
               const colCards = mergedCards.filter(c => c.colId === col.id);
@@ -910,7 +884,6 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
               </div>
           )}
       </div>
-      )}
 
       {/* Kanban Config Modal */}
       {isConfigModalOpen && (
