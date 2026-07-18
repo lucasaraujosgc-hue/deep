@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Plus, MoreVertical, Trash2, CheckSquare, Clock, AlertTriangle, 
-  ChevronDown, ChevronRight, Edit, Loader2, Calendar, Flag
+  ChevronDown, ChevronRight, Edit, Loader2, Calendar, Flag, X
 } from 'lucide-react';
 import { Task, TaskStatus, TaskPriority, UserSettings } from '../types';
 import { api } from '../services/api';
