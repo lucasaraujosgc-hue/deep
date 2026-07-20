@@ -2252,7 +2252,14 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
     try {
         const wrapper = getWaClientWrapper(req.user);
         if (!wrapper || wrapper.status !== 'connected') return res.status(400).json({error: 'Not connected'});
-        const chat = await wrapper.client.getChatById(req.params.chatId);
+        
+        let chat;
+        try {
+            chat = await wrapper.client.getChatById(req.params.chatId);
+        } catch (err) {
+            return res.json([]);
+        }
+
         const limitParam = parseInt(req.query.limit) || 50;
         const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
 

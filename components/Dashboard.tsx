@@ -285,7 +285,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   }, []);
 
   const firstColId = kanbanState.columns[0]?.id;
-  const mergedCards = waChats.map(chat => {
+  let mergedCards = waChats.map(chat => {
       const chatId = typeof chat.id === 'object' ? chat.id._serialized : chat.id;
       const existingCard = kanbanState.cards.find(c => c.id === chatId);
       const details = chatDetailsMap[chatId] || {};
@@ -301,7 +301,27 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
           colId: existingCard ? existingCard.colId : (firstColId || ''),
           tagIds: existingCard ? existingCard.tagIds : []
       };
-  }).filter(card => {
+  });
+
+  const mergedIds = new Set(mergedCards.map(c => c.id));
+  kanbanState.cards.forEach(card => {
+      if (!mergedIds.has(card.id)) {
+          const details = chatDetailsMap[card.id] || {};
+          mergedCards.push({
+              id: card.id,
+              name: getContactDisplayLabel(card.id, details.name || card.name || card.id.split('@')[0]),
+              unreadCount: 0,
+              lastMessage: details.lastMessage || '',
+              lastMessageFromMe: details.lastMessageFromMe || false,
+              profilePicUrl: details.profilePicUrl || null,
+              timestamp: 0,
+              colId: card.colId || (firstColId || ''),
+              tagIds: card.tagIds || []
+          });
+      }
+  });
+
+  const filteredCards = mergedCards.filter(card => {
       if (!searchTerm) return true;
       const term = searchTerm.toLowerCase();
       
@@ -426,8 +446,8 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
   const loadMessagesFromDb = async (chatId: string, before?: number): Promise<any[]> => {
     const token = localStorage.getItem('cm_auth_token');
     const url = before
-      ? `/api/whatsapp/messages-db/${chatId}?limit=50&before=${before}`
-      : `/api/whatsapp/messages-db/${chatId}?limit=50`;
+      ? `/api/whatsapp/messages-db/${encodeURIComponent(chatId)}?limit=50&before=${before}`
+      : `/api/whatsapp/messages-db/${encodeURIComponent(chatId)}?limit=50`;
 
     const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -507,7 +527,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
         const newLimit = msgLimit + 50;
         setMsgLimit(newLimit);
         const token = localStorage.getItem('cm_auth_token');
-        fetch(`/api/whatsapp/messages/${chatId}?limit=${newLimit}`, {
+        fetch(`/api/whatsapp/messages/${encodeURIComponent(chatId)}?limit=${newLimit}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         }).catch(() => {});
       }
@@ -738,7 +758,7 @@ const Dashboard: React.FC<Props> = ({ userSettings, onSaveSettings }) => {
       {/* Kanban Board */}
       <div className="flex-1 overflow-x-auto flex gap-3 p-3">
           {kanbanState.columns.map(col => {
-              const colCards = mergedCards.filter(c => c.colId === col.id);
+              const colCards = filteredCards.filter(c => c.colId === col.id);
               
               return (
                   <div 
