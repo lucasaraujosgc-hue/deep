@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Plus, MoreVertical, Trash2, CheckSquare, Clock, AlertTriangle, 
-  ChevronDown, ChevronRight, Edit, Loader2, Calendar, Flag, X
+  ChevronDown, ChevronRight, Edit, Loader2, Calendar, Flag, X, RefreshCw
 } from 'lucide-react';
 import { Task, TaskStatus, TaskPriority, UserSettings } from '../types';
 import { api } from '../services/api';
@@ -40,13 +40,31 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
   const [expandedNodes, setExpandedNodes] = useState<number[]>([]);
 
   // Filter state
-  const [filterStatus, setFilterStatus] = useState('ALL'); // ALL, PENDING
+  const [filterStatus, setFilterStatus] = useState(() => localStorage.getItem('taskDashboard_filterStatus') || 'ALL'); // ALL, PENDING
   const [filterPriority, setFilterPriority] = useState('ALL'); // ALL, alta, media, baixa
   const [searchTitle, setSearchTitle] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('taskDashboard_filterStatus', filterStatus);
+  }, [filterStatus]);
 
   useEffect(() => {
     loadTasks();
   }, []);
+
+  const handleSyncTasks = async () => {
+    setIsSyncing(true);
+    try {
+      const synced = await api.syncTasks();
+      setTasks(synced);
+    } catch (e) {
+      console.error("Erro ao sincronizar tarefas", e);
+      alert("Erro ao sincronizar tarefas com o Google");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const loadTasks = async () => {
     try {
@@ -357,24 +375,30 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
   return (
     <div className="h-full flex flex-col p-2 space-y-4">
       {/* Top Bar with Filter */}
-      <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Painel de Gestão Completa de Tarefas</h1>
-          <p className="text-gray-500">Visualize seu progresso e gerencie sua árvore de atividades.</p>
+          <h1 className="text-lg font-bold text-gray-800">Painel de Gestão Completa de Tarefas</h1>
+          <p className="text-xs text-gray-500">Visualize seu progresso e gerencie sua árvore de atividades.</p>
         </div>
-        <div className="flex flex-col md:flex-row gap-3">
-          <select 
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          >
-            <option value="ALL">Todos os Status</option>
-            <option value="PENDING">Somente Pendentes/Andamento</option>
-          </select>
+        <div className="flex flex-col md:flex-row gap-3 items-center">
+          <div className="flex bg-gray-100 p-1 rounded-xl">
+            <button 
+              onClick={() => setFilterStatus('ALL')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filterStatus === 'ALL' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Todas
+            </button>
+            <button 
+              onClick={() => setFilterStatus('PENDING')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filterStatus === 'PENDING' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Pendentes
+            </button>
+          </div>
           <select 
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
-            className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            className="bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
           >
             <option value="ALL">Todas Prioridades</option>
             <option value="alta">Prioridade Alta</option>
@@ -386,13 +410,21 @@ const TaskDashboard: React.FC<Props> = ({ userSettings }) => {
             placeholder="Buscar por título..."
             value={searchTitle}
             onChange={(e) => setSearchTitle(e.target.value)}
-            className="bg-white border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            className="bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none w-40"
           />
           <button 
-            onClick={() => handleOpenModal()}
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-blue-200 flex items-center gap-2 hover:bg-blue-700 hover:shadow-md transition-all whitespace-nowrap ml-2"
+            onClick={handleSyncTasks} 
+            disabled={isSyncing}
+            className="p-1.5 bg-white text-gray-500 hover:text-purple-600 hover:bg-purple-50 border border-gray-200 rounded-lg transition disabled:opacity-50" 
+            title="Sincronizar com Google Tasks"
           >
-            <Plus className="w-5 h-5" /> Nova Tarefa
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+          </button>
+          <button 
+            onClick={() => handleOpenModal()}
+            className="bg-blue-600 text-white px-4 py-1.5 text-sm rounded-xl font-medium shadow-sm shadow-blue-200 flex items-center gap-2 hover:bg-blue-700 hover:shadow-md transition-all whitespace-nowrap ml-1"
+          >
+            <Plus className="w-4 h-4" /> Nova Tarefa
           </button>
         </div>
       </div>
