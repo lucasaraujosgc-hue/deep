@@ -2,6 +2,7 @@
 export interface Company {
   id: number;
   name: string;
+  nickname?: string;
   docNumber: string; // CPF or CNPJ
   type: 'CNPJ' | 'CPF';
   email: string;

@@ -22,7 +22,7 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [newCompany, setNewCompany] = useState<Partial<Company>>({
-    name: '',
+    name: '', nickname: '',
     docNumber: '',
     type: 'CNPJ',
     email: '',
@@ -60,6 +60,7 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
   const handleEditCompany = (company: Company) => {
     setNewCompany({
         name: company.name,
+        nickname: company.nickname || '',
         docNumber: company.docNumber,
         type: company.type,
         email: company.email,
@@ -104,7 +105,7 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
         
         setIsModalOpen(false);
         setEditingId(null);
-        setNewCompany({ name: '', docNumber: '', type: 'CNPJ', email: '', whatsapp: '', categories: [], observation: '' });
+        setNewCompany({ name: '', nickname: '', docNumber: '', type: 'CNPJ', email: '', whatsapp: '', categories: [], observation: '' });
     } catch (error) {
         alert('Erro ao salvar empresa.');
     }
@@ -112,7 +113,7 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
 
   const handleOpenNewModal = () => {
       setEditingId(null);
-      setNewCompany({ name: '', docNumber: '', type: 'CNPJ', email: '', whatsapp: '', categories: [], observation: '' });
+      setNewCompany({ name: '', nickname: '', docNumber: '', type: 'CNPJ', email: '', whatsapp: '', categories: [], observation: '' });
       setIsModalOpen(true);
   };
 
@@ -371,6 +372,17 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
                       value={newCompany.name}
                       onChange={(e) => setNewCompany({...newCompany, name: e.target.value})}
                       required
+                   />
+                </div>
+                
+                <div>
+                   <label className="block text-sm font-semibold text-gray-700 mb-1">Apelido</label>
+                   <input 
+                      type="text" 
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                      value={newCompany.nickname || ''}
+                      onChange={(e) => setNewCompany({...newCompany, nickname: e.target.value})}
+                      placeholder="Ex: Empresa X"
                    />
                 </div>
                 

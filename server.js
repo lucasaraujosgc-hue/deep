@@ -264,6 +264,7 @@ export const getDb = (username) => {
     safeAlter("ALTER TABLE companies ADD COLUMN categories TEXT");
     safeAlter("ALTER TABLE companies ADD COLUMN observation TEXT");
     safeAlter("ALTER TABLE companies ADD COLUMN companyHash TEXT");
+    safeAlter("ALTER TABLE companies ADD COLUMN nickname TEXT");
     safeAlter("ALTER TABLE scheduled_messages ADD COLUMN documentsPayload TEXT");
     
     const tasksHasCreatedAt = db.prepare("PRAGMA table_info(tasks)").all().some(col => col.name === 'createdAt');
@@ -1808,6 +1809,14 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // --- HTML Builder Helper ---
+const processMessageVars = (msg, company) => {
+    if (!msg) return '';
+    let result = msg;
+    const apelido = company.nickname || company.name || '';
+    result = result.replace(/\{apelido\}/gi, apelido);
+    return result;
+};
+
 const buildEmailHtml = (messageBody, documents, emailSignature) => {
     let docsTable = '';
     if (documents && documents.length > 0) {
@@ -1818,7 +1827,13 @@ const buildEmailHtml = (messageBody, documents, emailSignature) => {
         });
         docsTable = `<h3 style="color: #2c3e50; border-bottom: 2px solid #eff6ff; padding-bottom: 10px; margin-top: 30px; font-size: 16px;">Documentos em Anexo:</h3><table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;"><thead><tr style="background-color: #f8fafc; color: #64748b;"><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Documento</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Categoria</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Vencimento</th><th style="padding: 10px; text-align: left; border-bottom: 2px solid #e2e8f0;">Competência</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
-    return `<html><body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);"><div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px; border-left: 4px solid #2563eb; margin-bottom: 25px;">${messageBody.replace(/\n/g, '<br>')}</div>${docsTable}<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #64748b;">${emailSignature || ''}</div></div></body></html>`;
+    
+    let htmlBody = (messageBody || '')
+        .replace(/\n/g, '<br>')
+        .replace(/\*(.*?)\*/g, '<b>$1</b>')
+        .replace(/_(.*?)_/g, '<i>$1</i>');
+
+    return `<html><body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 20px;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);"><div style="background-color: #f8f9fa; padding: 20px; border-radius: 6px; border-left: 4px solid #2563eb; margin-bottom: 25px;">${htmlBody}</div>${docsTable}<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #64748b;">${emailSignature || ''}</div></div></body></html>`;
 };
 
 // --- ROUTES ---
@@ -1962,7 +1977,7 @@ app.get('/api/companies', (req, res) => {
 });
 
 app.post('/api/companies', (req, res) => {
-    const { id, name, docNumber, type, email, whatsapp, categories, observation, companyHash } = req.body;
+    const { id, name, nickname, docNumber, type, email, whatsapp, categories, observation, companyHash } = req.body;
     const db = getDb(req.user);
     if (!db) return res.status(500).json({ error: 'Database error' });
     
@@ -1972,12 +1987,12 @@ app.post('/api/companies', (req, res) => {
 
     try {
         if (id) {
-            db.prepare(`UPDATE companies SET name=?, docNumber=?, type=?, email=?, whatsapp=?, categories=?, observation=?, companyHash=COALESCE(companyHash, ?) WHERE id=?`)
-                .run(name, docNumber, type, email, whatsapp, catStr, observation || '', hashToSave, id);
+            db.prepare(`UPDATE companies SET name=?, nickname=?, docNumber=?, type=?, email=?, whatsapp=?, categories=?, observation=?, companyHash=COALESCE(companyHash, ?) WHERE id=?`)
+                .run(name, nickname || '', docNumber, type, email, whatsapp, catStr, observation || '', hashToSave, id);
             res.json({success: true, id});
         } else {
-            const result = db.prepare(`INSERT INTO companies (name, docNumber, type, email, whatsapp, categories, observation, companyHash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(name, docNumber, type, email, whatsapp, catStr, observation || '', hashToSave);
+            const result = db.prepare(`INSERT INTO companies (name, nickname, docNumber, type, email, whatsapp, categories, observation, companyHash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(name, nickname || '', docNumber, type, email, whatsapp, catStr, observation || '', hashToSave);
             res.json({success: true, id: result.lastInsertRowid});
         }
     } catch (err) {
@@ -2764,7 +2779,7 @@ app.post('/api/whatsapp/reset', async (req, res) => {
 });
 
 app.post('/api/send-documents', async (req, res) => {
-    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate, whatsappFileSignature } = req.body;
+    const { documents, subject, messageBody, channels, emailSignature, whatsappTemplate, whatsappFileSignature, isBulk } = req.body;
     
     log(`[API send-documents] Iniciando envio de ${documents.length} documentos. Channels: ${JSON.stringify(channels)}`);
     
@@ -2794,7 +2809,6 @@ app.post('/api/send-documents', async (req, res) => {
         
         try {
             const company = db.prepare("SELECT * FROM companies WHERE id = ?").get(companyId);
-
             if (!company) { errors.push(`Empresa ID ${companyId} não encontrada.`); continue; }
 
             const sortedDocs = [...companyDocs].sort((a, b) => {
@@ -2821,9 +2835,11 @@ app.post('/api/send-documents', async (req, res) => {
                 }
             }
 
+            const processedMessageBody = processMessageVars(messageBody, company);
+
             if (channels.email && company.email) {
                 try {
-                    const finalHtml = buildEmailHtml(messageBody, companyDocs, emailSignature);
+                    const finalHtml = buildEmailHtml(processedMessageBody, companyDocs, emailSignature);
                     const finalSubject = `${subject} - Competência: ${companyDocs[0].competence || 'N/A'}`; 
                     
                     const emailList = company.email.split(',').map(e => e.trim()).filter(e => e);
@@ -2843,6 +2859,7 @@ app.post('/api/send-documents', async (req, res) => {
                             html: finalHtml,
                             attachments: validAttachments.map(a => ({ filename: a.filename, path: a.path, contentType: a.contentType }))
                         };
+
                         await emailTransporter.sendMail(mailOptions);
                         await saveToImapSentFolder(mailOptions).catch(err => 
                             log('[Email] Falha ao salvar no IMAP', err)
@@ -2865,8 +2882,11 @@ app.post('/api/send-documents', async (req, res) => {
                         `• ${att.docData.docName} (${att.docData.category || 'Anexo'}, Venc: ${att.docData.dueDate || 'N/A'})`
                     ).join('\n');
                     
-                    const whatsappSignature = whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo";
-                    let mensagemCompleta = `*📄 Olá!* \n\n${messageBody}`;
+                    const whatsappSignature = isBulk 
+                        ? (whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo")
+                        : (whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo");
+                        
+                    let mensagemCompleta = processedMessageBody;
                     
                     if (listaArquivos) {
                         mensagemCompleta += `\n\n*Arquivos enviados:*\n${listaArquivos}`;
@@ -2875,7 +2895,7 @@ app.post('/api/send-documents', async (req, res) => {
                     mensagemCompleta += `\n\n${whatsappSignature}`;
 
                     await safeSendMessage(client, chatId, mensagemCompleta);
-                    
+
                     for (const att of validAttachments) {
                         try {
                             const fileData = fs.readFileSync(att.path).toString('base64');
@@ -3097,11 +3117,14 @@ setInterval(() => {
                                 }
                             }
 
+                            const processedMessage = processMessageVars(msg.message, company);
+                            const processedTitle = processMessageVars(msg.title, company);
+
                             if (channels.email && company.email) {
                                try {
                                     const htmlContent = specificDocs.length > 0 
-                                    ? buildEmailHtml(msg.message, companySpecificDocs, settings?.emailSignature)
-                                    : buildEmailHtml(msg.message, [], settings?.emailSignature);
+                                    ? buildEmailHtml(processedMessage, companySpecificDocs, settings?.emailSignature)
+                                    : buildEmailHtml(processedMessage, [], settings?.emailSignature);
 
                                     const emailList = company.email.split(',').map(e => e.trim()).filter(e => e);
                                     const mainEmail = emailList[0];
@@ -3116,10 +3139,11 @@ setInterval(() => {
                                             from: fromAddress,
                                             to: mainEmail,
                                             cc: ccEmails,
-                                            subject: msg.title,
+                                            subject: processedTitle,
                                             html: htmlContent,
                                             attachments: attachmentsToSend.map(a => ({ filename: a.filename, path: a.path, contentType: a.contentType }))
                                         };
+
                                         await emailTransporter.sendMail(mailOptions);
                                         await saveToImapSentFolder(mailOptions).catch(err => 
                                             log('[CRON] Falha ao salvar no IMAP', err)
@@ -3134,19 +3158,19 @@ setInterval(() => {
                                     if (!number.startsWith('55')) number = '55' + number;
                                     const chatId = `${number}@c.us`;
                                     
-                                    let waBody = `*${msg.title}*\n\n${msg.message}`;
+                                    let waBody = `*${processedTitle}*\n\n${processedMessage}`;
 
                                     if (specificDocs.length > 0) {
-                                        waBody = `*📄 Olá!* \n\n${msg.message}\n\n*Arquivos enviados:*`;
                                         const listaArquivos = attachmentsToSend.map(att => 
                                             `• ${att.docData?.docName || att.filename} (${att.docData?.category || 'Anexo'}, Venc: ${att.docData?.dueDate || 'N/A'})`
                                         ).join('\n');
-                                        waBody += `\n${listaArquivos}`;
+                                        waBody += `\n\n*Arquivos enviados:*\n${listaArquivos}`;
                                     } else if (attachmentsToSend.length > 0) {
                                         waBody += `\n\n*Arquivo enviado:* ${attachmentsToSend[0].filename}`;
                                     }
                                     
-                                    waBody += `\n\n${settings?.whatsappTemplate || ''}`;
+                                    const whatsappSignature = settings?.whatsappFileSignature || settings?.whatsappTemplate || '';
+                                    waBody += `\n\n${whatsappSignature}`;
 
                                     await safeSendMessage(waWrapper.client, chatId, waBody);
                                     
