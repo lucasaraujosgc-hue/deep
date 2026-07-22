@@ -2882,9 +2882,7 @@ app.post('/api/send-documents', async (req, res) => {
                         `• ${att.docData.docName} (${att.docData.category || 'Anexo'}, Venc: ${att.docData.dueDate || 'N/A'})`
                     ).join('\n');
                     
-                    const whatsappSignature = isBulk 
-                        ? (whatsappFileSignature || whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo")
-                        : (whatsappTemplate || "_Esses arquivos também foram enviados por e-mail_\n\nAtenciosamente,\nLucas Araujo");
+                    const whatsappSignature = isBulk ? (whatsappFileSignature || "") : (whatsappTemplate || "");
                         
                     let mensagemCompleta = processedMessageBody;
                     
@@ -3169,7 +3167,7 @@ setInterval(() => {
                                         waBody += `\n\n*Arquivo enviado:* ${attachmentsToSend[0].filename}`;
                                     }
                                     
-                                    const whatsappSignature = settings?.whatsappFileSignature || settings?.whatsappTemplate || '';
+                                    const whatsappSignature = settings?.whatsappFileSignature || '';
                                     waBody += `\n\n${whatsappSignature}`;
 
                                     await safeSendMessage(waWrapper.client, chatId, waBody);

@@ -92,6 +92,7 @@ const Companies: React.FC<CompaniesProps> = ({ userSettings }) => {
         const payload = {
             id: editingId || undefined,
             name: newCompany.name,
+            nickname: newCompany.nickname,
             docNumber: newCompany.docNumber,
             type: newCompany.type,
             email: newCompany.email,
