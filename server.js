@@ -2229,7 +2229,7 @@ app.delete('/api/scheduled/:id', (req, res) => {
     }
 });
 
-app.get('/api/whatsapp/status', (req, res) => { 
+app.get('/api/whatsapp/status', authenticateToken, (req, res) => { 
     const wrapper = getWaClientWrapper(req.user);
     res.json({ 
         status: wrapper.status, 
@@ -2250,7 +2250,7 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); } 
 });
 
-app.get('/api/whatsapp/events', (req, res) => {
+app.get('/api/whatsapp/events', authenticateToken, (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
