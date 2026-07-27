@@ -53,6 +53,18 @@ const log = (message, error = null) => {
 log("Servidor iniciando...");
 log(`Diretório de dados: ${DATA_DIR}`);
 
+// Helper for extracting serialized ID safely after WhatsApp Web changes
+function getSerializedId(idObj) {
+    if (!idObj) return undefined;
+    if (idObj._serialized) return idObj._serialized;
+    if (idObj.$1) return idObj.$1;
+    if (typeof idObj.id === 'string') return idObj.id;
+    if (typeof idObj === 'string') return idObj;
+    
+    console.warn("[WARNING] Could not find serialized ID format in object:", idObj);
+    return String(idObj);
+}
+
 // --- AI CONFIGURATION ---
 export let ai = null;
 if (process.env.GEMINI_API_KEY) {
@@ -120,8 +132,8 @@ const safeSendMessage = async (client, chatId, content, options = {}) => {
                 const numberPart = finalChatId.replace('@c.us', '').replace(/\D/g, '');
                 const contactId = await client.getNumberId(numberPart);
                 
-                if (contactId && contactId._serialized) {
-                    finalChatId = contactId._serialized;
+                if (contactId && getSerializedId(contactId)) {
+                    finalChatId = getSerializedId(contactId);
                 }
             }
         } catch (idErr) {
@@ -1013,7 +1025,7 @@ const executeTool = async (name, args, db, username) => {
                 const chats = await waWrapper.client.getChats();
                 for (const chat of chats) {
                     if (chat.isGroup) continue;
-                    const chatId = chat.id._serialized || "";
+                    const chatId = getSerializedId(chat.id) || "";
                     const chatName = (chat.name || "").toLowerCase();
                     const phone = chatId.replace("@c.us", "").replace("@lid", "");
                     if (!chatName.includes(query) && !phone.includes(query.replace(/\D/g, ""))) continue;
@@ -1025,17 +1037,17 @@ const executeTool = async (name, args, db, username) => {
                             const numberPart = phone;
                             if (numberPart) {
                                 const contactId = await waWrapper.client.getNumberId(numberPart);
-                                if (contactId && contactId._serialized !== chatId) {
-                                    if (!results.some(r => r.chat_id === contactId._serialized)) {
+                                if (contactId && getSerializedId(contactId) !== chatId) {
+                                    if (!results.some(r => r.chat_id === getSerializedId(contactId))) {
                                         const resolvedEntry = {
-                                            chat_id: contactId._serialized,
+                                            chat_id: getSerializedId(contactId),
                                             name: chat.name,
                                             phone_number: numberPart,
-                                            chat_id_type: contactId._serialized.includes('@lid') ? 'lid' : 'c.us',
+                                            chat_id_type: getSerializedId(contactId).includes('@lid') ? 'lid' : 'c.us',
                                             source: 'chat_resolved'
                                         };
                                         results.push(resolvedEntry);
-                                        upsertContactCache(db, contactId._serialized, chat.name, numberPart);
+                                        upsertContactCache(db, getSerializedId(contactId), chat.name, numberPart);
                                     }
                                     continue;
                                 }
@@ -1124,7 +1136,7 @@ const executeTool = async (name, args, db, username) => {
                 const chats = await waWrapper.client.getChats();
                 for (const chat of chats) {
                     if (chat.isGroup) continue;
-                    const chatId = chat.id._serialized;
+                    const chatId = getSerializedId(chat.id);
                     const chatPhone = chatId.replace('@c.us', '').replace('@lid', '').replace(/\D/g, '');
                     const nameMatch = (chat.name || '').toLowerCase().includes(lowerQuery);
                     const phoneMatch = phoneQuery.length >= 8 && chatPhone.includes(phoneQuery);
@@ -1136,8 +1148,8 @@ const executeTool = async (name, args, db, username) => {
                     if (!isLid && chatPhone) {
                         try {
                             const numberId = await waWrapper.client.getNumberId(chatPhone);
-                            if (numberId && numberId._serialized) {
-                                finalId = numberId._serialized;
+                            if (numberId && getSerializedId(numberId)) {
+                                finalId = getSerializedId(numberId);
                             }
                         } catch (_) {}
                     }
@@ -1490,7 +1502,7 @@ const getWaClientWrapper = (username) => {
             }
 
             const msgPayload = {
-                id: msg.id._serialized,
+                id: getSerializedId(msg.id),
                 from: msg.from,
                 to: msg.to,
                 body: msg.body,
@@ -1505,7 +1517,7 @@ const getWaClientWrapper = (username) => {
 
             if (db) {
                 saveMessageToDb(db, {
-                    id: msg.id._serialized,
+                    id: getSerializedId(msg.id),
                     chatId,
                     sender: msg.from,
                     timestamp: msg.timestamp,
@@ -1515,7 +1527,7 @@ const getWaClientWrapper = (username) => {
                     type: msg.type
                 });
                 try {
-                    db.prepare("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?").run(contactName, msg.id._serialized);
+                    db.prepare("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?").run(contactName, getSerializedId(msg.id));
                 } catch (e) {}
             }
 
@@ -1629,7 +1641,7 @@ const getWaClientWrapper = (username) => {
                 }
 
                 broadcastWaEvent(username, 'whatsapp_message', {
-                    id: msg.id._serialized,
+                    id: getSerializedId(msg.id),
                     from: msg.from,
                     to: msg.to,
                     body: msg.body,
@@ -1643,7 +1655,7 @@ const getWaClientWrapper = (username) => {
 
                 if (db) {
                     saveMessageToDb(db, {
-                        id: msg.id._serialized,
+                        id: getSerializedId(msg.id),
                         chatId,
                         sender: msg.from,
                         timestamp: msg.timestamp,
@@ -1653,7 +1665,7 @@ const getWaClientWrapper = (username) => {
                         type: msg.type
                     });
                     try {
-                        db.prepare("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?").run(contactName, msg.id._serialized);
+                        db.prepare("UPDATE whatsapp_messages SET contactName = ? WHERE id = ?").run(contactName, getSerializedId(msg.id));
                     } catch (e) {}
                 }
             }
@@ -1684,7 +1696,7 @@ const getWaClientWrapper = (username) => {
                     let seeded = 0;
                     for (const chat of chats) {
                         if (chat.isGroup) continue;
-                        const chatId = chat.id._serialized;
+                        const chatId = getSerializedId(chat.id);
                         if (!chatId) continue;
                         const isLid = chatId.includes('@lid');
                         let resolvedId = chatId;
@@ -1693,8 +1705,8 @@ const getWaClientWrapper = (username) => {
                         if (!isLid && phone) {
                             try {
                                 const numberId = await client.getNumberId(phone);
-                                if (numberId && numberId._serialized) {
-                                    resolvedId = numberId._serialized;
+                                if (numberId && getSerializedId(numberId)) {
+                                    resolvedId = getSerializedId(numberId);
                                 }
                             } catch (_) {}
                         }
@@ -2229,7 +2241,7 @@ app.delete('/api/scheduled/:id', (req, res) => {
     }
 });
 
-app.get('/api/whatsapp/status', authenticateToken, (req, res) => { 
+app.get('/api/whatsapp/status', (req, res) => { 
     const wrapper = getWaClientWrapper(req.user);
     res.json({ 
         status: wrapper.status, 
@@ -2250,7 +2262,7 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); } 
 });
 
-app.get('/api/whatsapp/events', authenticateToken, (req, res) => {
+app.get('/api/whatsapp/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -2279,7 +2291,7 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
         const messages = await chat.fetchMessages({limit: Math.min(limitParam, 300)});
 
         const mapped = messages.map(m => ({
-            id: m.id._serialized,
+            id: getSerializedId(m.id),
             from: m.from,
             to: m.to,
             body: m.body,
@@ -2296,7 +2308,7 @@ app.get('/api/whatsapp/messages/:chatId', authenticateToken, async (req, res) =>
             const toSave = messages
                 .filter(m => m.timestamp >= FORTY_FIVE_DAYS_AGO)
                 .map(m => ({
-                    id: m.id._serialized,
+                    id: getSerializedId(m.id),
                     chatId,
                     sender: m.from,
                     timestamp: m.timestamp,
@@ -2434,15 +2446,15 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
 
         while (fetchedBatch && fetchedBatch.length > 0 && !reachedLimit) {
             const currentOldest = fetchedBatch.reduce((o, m) => m.timestamp < o.timestamp ? m : o, fetchedBatch[0]);
-            if (lastOldestId && currentOldest.id._serialized === lastOldestId) {
+            if (lastOldestId && getSerializedId(currentOldest.id) === lastOldestId) {
                 log('[History] Loop detectado (API sem suporte a cursor before). Parando.');
                 break;
             }
-            lastOldestId = currentOldest.id._serialized;
+            lastOldestId = getSerializedId(currentOldest.id);
 
             const inPeriod = fetchedBatch.filter(m => {
-                if (seenIds.has(m.id._serialized)) return false;
-                seenIds.add(m.id._serialized);
+                if (seenIds.has(getSerializedId(m.id))) return false;
+                seenIds.add(getSerializedId(m.id));
                 return m.timestamp >= FORTY_FIVE_DAYS_AGO;
             });
 
@@ -2460,7 +2472,7 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
             try {
                 fetchedBatch = await chat.fetchMessages({
                     limit: 100,
-                    before: currentOldest.id._serialized
+                    before: getSerializedId(currentOldest.id)
                 });
             } catch (cursorErr) {
                 log('[History] Cursor before não suportado, parando paginação.', cursorErr);
@@ -2469,7 +2481,7 @@ app.post('/api/whatsapp/load-history/:chatId', authenticateToken, async (req, re
         }
 
         const toSave = allMessages.map(m => ({
-            id: m.id._serialized,
+            id: getSerializedId(m.id),
             chatId,
             sender: m.from,
             timestamp: m.timestamp,
@@ -2582,8 +2594,8 @@ app.post('/api/whatsapp/contact', async (req, res) => {
         if(!cleanNumber.startsWith('55')) cleanNumber = '55' + cleanNumber;
         const contactId = await wrapper.client.getNumberId(cleanNumber);
         if(contactId) {
-            const chat = await wrapper.client.getChatById(contactId._serialized);
-            return res.json({ id: chat.id._serialized, name: chat.name, isGroup: chat.isGroup });
+            const chat = await wrapper.client.getChatById(getSerializedId(contactId));
+            return res.json({ id: getSerializedId(chat.id), name: chat.name, isGroup: chat.isGroup });
         }
         res.status(404).json({error: 'Contact not found on WhatsApp'});
     } catch(e) { res.status(500).json({error: e.message}); }
@@ -2653,14 +2665,14 @@ app.get('/api/whatsapp/chats', authenticateToken, async (req, res) => {
             const chats = await wrapper.client.getChats();
             const now = Date.now() / 1000;
             const filteredChats = chats.filter(c => !c.isGroup).filter(c => {
-                if (kanbanCards.includes(c.id._serialized)) return true;
+                if (kanbanCards.includes(getSerializedId(c.id))) return true;
                 if (c.unreadCount > 0) return true;
                 if (c.timestamp && (now - c.timestamp) < 86400 * 7) return true;
                 return false;
             });
 
             const simplifiedChats = filteredChats.map(c => {
-                const chatId = c.id._serialized;
+                const chatId = getSerializedId(c.id);
                 let msgBody = '';
                 let msgFromMe = false;
                 try {

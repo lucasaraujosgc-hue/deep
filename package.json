@@ -27,7 +27,7 @@
     "react-markdown": "^10.1.0",
     "recharts": "^3.9.2",
     "uuid": "^13.0.0",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
+    "whatsapp-web.js": "github:lindionez/whatsapp-web.js#f4ea1e3cf4076e44e36dfe5f81ea57048d2f7761",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
