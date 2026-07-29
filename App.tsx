@@ -218,7 +218,7 @@ const App: React.FC = () => {
       />
       
       <main className="flex-1 overflow-hidden w-full relative flex flex-col">
-        {activePage !== 'dashboard' && (
+        {activePage !== 'dashboard' && activePage !== 'kanban' && (
           <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-30 shrink-0">
             <h2 className="text-lg font-semibold text-gray-700 capitalize">
               {activePage === 'bulksend' ? 'Envio em Massa' : activePage === 'settings' ? 'Usuário' : activePage === 'send' ? 'Envio' : activePage === 'pendencies' ? 'Situação Fiscal' : activePage}
