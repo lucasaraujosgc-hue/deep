@@ -53,17 +53,7 @@ const log = (message, error = null) => {
 log("Servidor iniciando...");
 log(`Diretório de dados: ${DATA_DIR}`);
 
-// Helper for extracting serialized ID safely after WhatsApp Web changes
-function idObj._serialized {
-    if (!idObj) return undefined;
-    if (idObj._serialized) return idObj._serialized;
-    if (idObj.$1) return idObj.$1;
-    if (typeof idObj.id === 'string') return idObj.id;
-    if (typeof idObj === 'string') return idObj;
-    
-    console.warn("[WARNING] Could not find serialized ID format in object:", idObj);
-    return String(idObj);
-}
+
 
 // --- AI CONFIGURATION ---
 export let ai = null;
