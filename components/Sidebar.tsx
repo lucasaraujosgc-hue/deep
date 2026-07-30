@@ -47,8 +47,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isOpen, se
   };
 
   const menuItems = [
-    { id: 'dashboard', label: 'Painel de Tarefas', icon: LayoutDashboard },
     { id: 'kanban', label: 'Kanban (WhatsApp)', icon: MessageCircle },
+    { id: 'dashboard', label: 'Painel de Tarefas', icon: LayoutDashboard },
     { id: 'companies', label: 'Empresas', icon: Building2 },
     { id: 'pendencies', label: 'Situação Fiscal', icon: FileSearch },
     { id: 'documents', label: 'Documentos', icon: FileText },
