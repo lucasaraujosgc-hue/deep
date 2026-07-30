@@ -21,7 +21,7 @@ import { api } from './services/api';
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [activePage, setActivePage] = useState('dashboard');
+  const [activePage, setActivePage] = useState('kanban');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Inicia sempre com os padrões completos
